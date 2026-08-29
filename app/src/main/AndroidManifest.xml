@@ -53,33 +53,40 @@
             </intent-filter>
 
             <!--
-              Opening a chart from a file manager, an email attachment or another
-              app's share sheet. This is one of the two ways a set list gets from
-              one phone to another, the other being the local session.
+              Opening a file the user tapped somewhere else: a chart in a file
+              manager, a set list attached to an email.
+
+              The schemes are declared explicitly, and that is not decoration.
+              An intent filter with a VIEW action and no scheme reads as a web
+              link with no URL - lint says so, and it is right, because without
+              one this filter claims every VIEW of those MIME types including
+              http ones the app cannot open. DroidMusic handles exactly two:
+              content:// from a document provider, and file:// from local
+              storage.
+
+              No BROWSABLE category either. That category means "a browser may
+              hand this to you", which is not how a chart or a set list ever
+              arrives here.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="image/*" />
+                <data android:mimeType="application/json" />
             </intent-filter>
 
             <!--
-              Receiving a set list somebody sent. Matched on MIME type alone.
+              A set list arriving through another app's share sheet.
 
-              A path pattern for `*.dmset` was the obvious addition and is not
-              worth having: Android ignores path attributes once a mimeType is
-              present, and a content:// URI from a mail client or a cloud
-              provider usually has an opaque path with no filename in it at all,
-              so the pattern would match almost nothing while making the filter
-              look like a malformed app link. Anything that arrives under
-              another type is imported through the picker on the set list
-              screen instead.
+              Separate from the filter above because a SEND carries its payload
+              in EXTRA_STREAM rather than in the intent's data URI, so matching
+              on a scheme would reject every share. SEND matches on type alone.
             -->
             <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/json" />
