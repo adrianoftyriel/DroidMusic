@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
+        <!-- Same reasoning as backup_rules.xml: the index and the cache do not
+             survive the move meaningfully, so they are not sent. -->
         <include domain="file" path="setlists/" />
-        <include domain="shared_pref" path="." />
-        <exclude domain="file" path="managed/" />
+        <include domain="file" path="settings.json" />
     </cloud-backup>
     <device-transfer>
-        <!-- A phone-to-phone transfer can afford to carry the charts too. -->
+        <!-- A direct phone-to-phone transfer can afford to carry the charts too,
+             and it is the same person's device at the other end. -->
         <include domain="file" path="." />
-        <include domain="shared_pref" path="." />
     </device-transfer>
 </data-extraction-rules>

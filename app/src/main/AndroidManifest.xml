@@ -66,23 +66,23 @@
                 <data android:mimeType="image/*" />
             </intent-filter>
 
+            <!--
+              Receiving a set list somebody sent. Matched on MIME type alone.
+
+              A path pattern for `*.dmset` was the obvious addition and is not
+              worth having: Android ignores path attributes once a mimeType is
+              present, and a content:// URI from a mail client or a cloud
+              provider usually has an opaque path with no filename in it at all,
+              so the pattern would match almost nothing while making the filter
+              look like a malformed app link. Anything that arrives under
+              another type is imported through the picker on the set list
+              screen instead.
+            -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/json" />
-            </intent-filter>
-
-            <!-- Set list files by extension, for providers that send them as octet-stream. -->
-            <intent-filter android:priority="1">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
-                <data android:host="*" />
-                <data android:mimeType="*/*" />
-                <data android:pathPattern=".*\\.dmset" />
             </intent-filter>
         </activity>
 

@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <!--
-      Set lists and settings are worth restoring onto a new phone. The chart
-      cache is not: it can be large, and every file in it can be fetched again
-      from the source it came from.
+      Set lists and settings are worth carrying to a new phone. Two things
+      deliberately are not.
+
+      The chart cache, because every file in it can be fetched again from the
+      folder it came from, and a songbook of scans is not something to push
+      through a backup.
+
+      The library index, because it is a list of provider URIs, and a URI
+      granted to one install means nothing to another. Restoring it would give
+      the user a library full of entries that look right and will not open,
+      which is worse than an empty one saying "add a folder".
     -->
     <include domain="file" path="setlists/" />
-    <include domain="shared_pref" path="." />
-    <exclude domain="file" path="cache/" />
-    <exclude domain="file" path="managed/" />
+    <include domain="file" path="settings.json" />
 </full-backup-content>

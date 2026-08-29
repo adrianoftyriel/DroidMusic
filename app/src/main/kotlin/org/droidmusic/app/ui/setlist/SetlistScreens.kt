@@ -1,5 +1,9 @@
 package org.droidmusic.app.ui.setlist
 
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +16,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
@@ -50,12 +55,35 @@ fun SetlistsScreen(
     var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
 
+    // The other half of "send them to other devices": opening one somebody
+    // sent. The manifest also catches a set list tapped in a mail client, but
+    // that only fires when the sending app labels it as JSON - plenty do not,
+    // so there has to be a way in from this screen as well.
+    val importFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val uri = result.data?.data
+        if (result.resultCode == Activity.RESULT_OK && uri != null) controller.import(uri)
+    }
+
     Column(Modifier.fillMaxSize()) {
         Header(
             title = "Set lists",
             subtitle = "${book.setlists.size} saved",
             onBack = onBack,
             actions = {
+                HeaderAction(Icons.Filled.Download, "Open a set list someone sent") {
+                    importFile.launch(
+                        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                            putExtra(
+                                Intent.EXTRA_MIME_TYPES,
+                                arrayOf("application/json", "text/plain", "application/octet-stream"),
+                            )
+                        },
+                    )
+                }
                 HeaderAction(Icons.Filled.Add, "New set list") {
                     newName = ""
                     creating = true

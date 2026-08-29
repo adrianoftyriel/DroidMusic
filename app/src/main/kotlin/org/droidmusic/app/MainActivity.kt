@@ -1,5 +1,8 @@
 package org.droidmusic.app
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -46,6 +49,17 @@ class MainActivity : ComponentActivity() {
      */
     private val rawKeys = MutableSharedFlow<Int>(extraBufferCapacity = 8)
 
+    /**
+     * Files handed to the app from outside: a set list opened from an email, a
+     * chart shared from a file manager.
+     *
+     * `replay = 1` because the intent that started the activity is delivered
+     * before Compose has begun collecting. Without it the very first case - the
+     * one where somebody taps an attachment and the app is not already running -
+     * is the one that silently does nothing.
+     */
+    private val incomingFiles = MutableSharedFlow<Uri>(replay = 1, extraBufferCapacity = 4)
+
     private val app: DroidMusicApp get() = application as DroidMusicApp
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +74,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        handleIncoming(intent)
+
         setContent {
             val settings by app.settings.settings.collectAsState()
             DroidMusicRoot(
@@ -67,9 +83,35 @@ class MainActivity : ComponentActivity() {
                 settings = settings,
                 pedalActions = pedalActions,
                 rawKeys = rawKeys,
+                incomingFiles = incomingFiles,
                 onImmersive = ::applyImmersiveMode,
             )
         }
+    }
+
+    /**
+     * The activity is `singleTask`, so a second file opened while it is already
+     * running arrives here rather than through onCreate.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncoming(intent)
+    }
+
+    /** Pulls the URI out of a VIEW or SEND intent, whichever kind it is. */
+    private fun handleIncoming(intent: Intent?) {
+        val uri = when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            }
+            else -> null
+        } ?: return
+        incomingFiles.tryEmit(uri)
     }
 
     /**

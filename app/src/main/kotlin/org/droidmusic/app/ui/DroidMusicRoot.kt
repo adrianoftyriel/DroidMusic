@@ -49,6 +49,7 @@ fun DroidMusicRoot(
     settings: AppSettings,
     pedalActions: SharedFlow<PageAction>,
     rawKeys: SharedFlow<Int>,
+    incomingFiles: SharedFlow<android.net.Uri>,
     onImmersive: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
@@ -168,6 +169,24 @@ fun DroidMusicRoot(
         val setlist = pushed ?: return@LaunchedEffect
         setlistController.adopt(setlist, sessionCoordinator.sessionLabel.value)
         sessionCoordinator.consumePushedSetlist()
+    }
+
+    // A file arrived from outside the app - an attachment, a share, a file
+    // manager. A set list is imported; anything else is added to the library,
+    // because the alternative is telling somebody who just tapped a chart that
+    // the app cannot open it when it plainly can.
+    LaunchedEffect(Unit) {
+        incomingFiles.collect { uri ->
+            val name = uri.toString().lowercase()
+            if (name.endsWith(".dmset") || name.endsWith(".json") ||
+                context.contentResolver.getType(uri) == "application/json"
+            ) {
+                setlistController.import(uri)
+                navigator.go(Screen.Setlists)
+            } else {
+                libraryController.addFiles(listOf(uri))
+            }
+        }
     }
 
     BackHandler(enabled = navigator.canGoBack || controlsVisible) {
