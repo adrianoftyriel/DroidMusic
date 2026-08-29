@@ -186,7 +186,7 @@ fun LibraryScreen(
             LazyColumn(Modifier.fillMaxSize()) {
                 item { SectionLabel("${songs.size} charts") }
                 items(songs, key = { it.id }) { song ->
-                    SongRow(song, controller.sourceLabel(song.sourceId)) { onOpenSong(song) }
+                    SongRow(song, controller.sourceLabel(index, song.sourceId)) { onOpenSong(song) }
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                 }
             }

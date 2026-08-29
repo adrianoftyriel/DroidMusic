@@ -137,8 +137,14 @@ class LibraryController(
         }
     }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/')
 
-    fun sourceLabel(sourceId: String): String {
-        val source = index.value.sources.firstOrNull { it.id == sourceId } ?: return "Unknown"
+    /**
+     * Takes the index rather than reading the flow, because this is called while
+     * a list row is being composed. Reading `StateFlow.value` there gives a
+     * snapshot Compose is not subscribed to, so the label would keep saying
+     * "Unknown" after a rescan until something else happened to recompose it.
+     */
+    fun sourceLabel(index: LibraryIndex, sourceId: String): String {
+        val source = index.sources.firstOrNull { it.id == sourceId } ?: return "Unknown"
         return if (source.kind == SourceKind.EXTERNAL_TREE) {
             "${source.label} (${DocumentSources.providerLabel(source.authority)})"
         } else {

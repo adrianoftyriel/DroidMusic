@@ -19,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -28,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.droidmusic.app.net.DiscoveredSession
 import org.droidmusic.app.ui.common.Dot
@@ -60,15 +60,22 @@ fun SessionScreen(
 
     var sessionName by remember { mutableStateOf("") }
 
-    // Discovery runs only while this screen is open. Browsing mDNS costs battery
-    // and there is no reason to do it while somebody is playing.
-    val discovered by produceState(initialValue = emptyList<DiscoveredSession>(), role) {
+    // Discovery runs only while this screen is open, and only while this device
+    // is not already in a session. Browsing mDNS costs battery, and there is no
+    // reason to do it while somebody is playing.
+    //
+    // Collected directly rather than through produceState: discovery is already
+    // a flow, so there is nothing to produce - and assigning `value` from inside
+    // a nested collect is a pattern neither a reader nor Compose's own lint can
+    // follow.
+    val discovery = remember(role) {
         if (role == SessionRole.NONE) {
-            coordinator.discoverSessions()
-                .catch { value = emptyList() }
-                .collect { value = it }
+            coordinator.discoverSessions().catch { emit(emptyList()) }
+        } else {
+            flowOf(emptyList<DiscoveredSession>())
         }
     }
+    val discovered by discovery.collectAsState(initial = emptyList())
 
     Column(Modifier.fillMaxSize()) {
         Header(
