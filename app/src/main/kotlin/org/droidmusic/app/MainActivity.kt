@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
                 settings = settings,
                 pedalActions = pedalActions,
                 rawKeys = rawKeys,
-                onImmersive = ::setImmersive,
+                onImmersive = ::applyImmersiveMode,
             )
         }
     }
@@ -84,8 +84,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Hides the system bars while a chart is open, so the page gets the screen. */
-    private fun setImmersive(immersive: Boolean) {
+    /**
+     * Hides the system bars while a chart is open, so the page gets the screen.
+     *
+     * Not called `setImmersive`: `Activity` already has a member of that name -
+     * the setter for its own `immersive` property - and shadowing it would mean
+     * this method could be called when the platform meant the other one.
+     */
+    private fun applyImmersiveMode(immersive: Boolean) {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (immersive) {
             controller.hide(WindowInsetsCompat.Type.systemBars())
