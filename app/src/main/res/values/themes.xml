@@ -1,0 +1,13 @@
+<resources>
+    <!--
+      A bare theme. Colour and typography are Compose's job; this exists so the
+      window has the right background before the first frame, which on a dark
+      stage is the difference between a smooth launch and a white flash.
+    -->
+    <style name="Theme.DroidMusic" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

@@ -1,0 +1,364 @@
+name: Build
+
+# One workflow, layered, for the same reason FBKSuppressor uses one: a release
+# must ship the exact artifacts that were tested, and the simplest way to
+# guarantee that is to publish the ones this run produced.
+#
+#   push to dev   -> pre-release, tagged vX.Y.Z-dev.<run number>
+#   push to main  -> release,     tagged vX.Y.Z
+#
+# The version comes from gradle.properties, which is the single source of truth
+# for the app's versionName too. A merge to main whose version already has a
+# release fails loudly rather than overwriting it.
+on:
+  push:
+    branches: [main, dev, 'claude/**']
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "17"
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.incremental=false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The pure-Kotlin core, as a fast gate.
+  #
+  # These three modules have no Android dependency, which is the whole reason
+  # they are separate modules. They hold the transposition engine, the chart
+  # parsers, the set list format and the band-sync rules - in other words every
+  # part of the app where being wrong is silent. A wrong page number is obvious;
+  # a chart transposed into G sharp major, or a follower left three pages behind
+  # after a reconnect, is not.
+  #
+  # It runs in well under a minute with no Android SDK to install, against the
+  # four-plus minutes the app build needs before it can report the same failure.
+  core-tests:
+    name: Core tests (JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # -PcoreOnly leaves the app module out of the build entirely, so this job
+      # never touches the Android toolchain. It is also the command a contributor
+      # runs on a laptop with no SDK installed.
+      - name: Run the core suites
+        run: ./gradlew -PcoreOnly coreTests --stacktrace
+
+      - name: Publish the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-report
+          path: |
+            core/*/build/reports/tests/test
+            core/*/build/test-results/test
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build APK
+    needs: core-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Release builds are signed with a real key when the repository has one,
+      # and with the debug key when it does not. Writing the keystore here rather
+      # than in the Gradle file keeps the secret handling in one visible place.
+      #
+      # A fork has no secrets, and the right outcome there is a release APK that
+      # still installs - clearly debug-signed - rather than a failed build. An
+      # unsigned APK nobody can install is not safer, just less useful.
+      - name: Set up release signing
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+            {
+              echo "storeFile=release.keystore"
+              echo "storePassword=${KEYSTORE_PASSWORD}"
+              echo "keyAlias=${KEY_ALIAS}"
+              echo "keyPassword=${KEY_PASSWORD}"
+            } > keystore.properties
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Release builds will be signed with the repository key."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No signing key configured; the release APK will be debug-signed."
+          fi
+
+      - name: Lint
+        run: ./gradlew :app:lintRelease --stacktrace
+
+      - name: Unit tests
+        run: ./gradlew test --stacktrace
+
+      - name: Assemble
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+
+      # A release AAB as well, so the same run can feed Play without a second
+      # build from a different commit.
+      - name: Bundle
+        run: ./gradlew :app:bundleRelease --stacktrace
+
+      - name: Collect artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          find app/build/outputs -name '*.apk' -exec cp {} staging/ \;
+          find app/build/outputs -name '*.aab' -exec cp {} staging/ \;
+          ls -la staging
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DroidMusic-apk
+          path: staging/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-reports
+          path: |
+            app/build/reports
+            app/build/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
+
+  # ---------------------------------------------------------------------------
+  # Publishing. Gated on the build, so a release can only ever contain artifacts
+  # that passed both suites; the APKs stay downloadable from the run itself even
+  # when this job declines to publish.
+  publish:
+    name: Publish ${{ github.ref_name == 'main' && 'release' || 'pre-release' }}
+    needs: build
+    # workflow_dispatch as well as push, purely as a recovery path: a run can
+    # stall between the build finishing and this job being scheduled, and without
+    # a manual trigger the only way to publish that commit would be to invent a
+    # new one.
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # Full history and tags, so the changelog is generated against the previous
+      # release rather than guessed.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: DroidMusic-apk
+          path: artifacts
+
+      - name: Work out the version and tag
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          version=$(sed -n 's/^droidmusic\.versionName=\(.*\)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')
+          if [ -z "$version" ]; then
+            echo "::error::Could not read droidmusic.versionName from gradle.properties"
+            exit 1
+          fi
+
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            tag="v${version}"
+            title="DroidMusic ${tag}"
+            prerelease=false
+
+            # Refuse to clobber an existing release. Republishing over a tag
+            # would silently replace an APK somebody may already have installed,
+            # so this is a hard stop with an actionable message.
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "::error::Release $tag already exists. Bump droidmusic.versionName in gradle.properties before merging to main."
+              exit 1
+            fi
+          else
+            # Pre-release tags carry the run number, so every push to dev
+            # produces a distinct, ordered tag without anyone bumping anything.
+            tag="v${version}-dev.${{ github.run_number }}"
+            title="DroidMusic ${tag} (pre-release)"
+            prerelease=true
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "Publishing $tag (prerelease=$prerelease)"
+
+      - name: Name the files after the version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          mkdir -p dist
+
+          shopt -s nullglob
+          found=0
+          for file in artifacts/*.apk artifacts/*.aab; do
+            [ -e "$file" ] || continue
+            base=$(basename "$file")
+            case "$base" in
+              *release*.apk) cp "$file" "dist/DroidMusic-${version}.apk" ;;
+              *debug*.apk)   cp "$file" "dist/DroidMusic-${version}-debug.apk" ;;
+              *.aab)         cp "$file" "dist/DroidMusic-${version}.aab" ;;
+              *)             cp "$file" "dist/$base" ;;
+            esac
+            found=$((found + 1))
+          done
+
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No APK or AAB was found to publish"
+            exit 1
+          fi
+
+          ( cd dist && sha256sum * > SHA256SUMS.txt )
+          ls -la dist
+
+      - name: Compose release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Compare against the previous release of the same kind: a full release
+          # against the last full release, a pre-release against whatever came last.
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            previous=$(gh release list --limit 100 --json tagName,isPrerelease,createdAt \
+              --jq '[.[] | select(.isPrerelease == false)] | sort_by(.createdAt) | last | .tagName // ""' || echo "")
+          else
+            previous=$(gh release list --limit 100 --json tagName,createdAt \
+              --jq 'sort_by(.createdAt) | last | .tagName // ""' || echo "")
+          fi
+
+          {
+            if [ "${{ github.ref_name }}" = "dev" ]; then
+              echo "Automated pre-release from \`dev\`. Built and tested, but not a stable release."
+              echo
+            fi
+
+            echo "Commit \`${GITHUB_SHA:0:8}\`. The music-theory, set list and band-sync suites"
+            echo "passed on the JVM, and the app's own unit tests passed against the Android"
+            echo "toolchain, before this APK was assembled."
+            echo
+
+            echo "## Install"
+            echo
+            echo "Download \`DroidMusic-${{ steps.meta.outputs.version }}.apk\` and open it on the"
+            echo "device. Android will ask you to allow installing from this source the first time."
+            echo
+
+            if [ "${{ needs.build.outputs.signed }}" != "true" ]; then
+              echo "> **This build is signed with the debug key**, because no release signing key is"
+              echo "> configured for this repository. It installs and runs normally, but it cannot be"
+              echo "> upgraded in place from a release-signed build - uninstall first if you have one."
+              echo
+            fi
+
+            echo "Minimum Android 8.0 (API 26). Phones and tablets, portrait and landscape."
+            echo
+
+            echo "## Downloads"
+            echo
+            echo "| File | What it is |"
+            echo "|---|---|"
+            echo "| \`DroidMusic-${{ steps.meta.outputs.version }}.apk\` | Release build. This is the one to install. |"
+            echo "| \`DroidMusic-${{ steps.meta.outputs.version }}-debug.apk\` | Debug build, installs alongside the release one. |"
+            echo "| \`DroidMusic-${{ steps.meta.outputs.version }}.aab\` | App bundle, for Play Store upload. |"
+            echo "| \`SHA256SUMS.txt\` | Checksums. |"
+            echo
+
+            echo "## First steps"
+            echo
+            echo "1. **Add a folder.** Any folder the system file picker can reach works, which"
+            echo "   includes Google Drive, OneDrive, Dropbox, Box and Proton Drive - they all"
+            echo "   publish a provider Android can read, so there is no separate sign-in."
+            echo "2. **Check the page turns.** Tap the right two thirds to go forward, the left"
+            echo "   third to go back. A Bluetooth or USB foot switch works with no setup on most"
+            echo "   pedals; Settings has a learn mode for the rest."
+            echo "3. **Try a session.** One device taps Start under Band session, the others tap"
+            echo "   its name. Pull the leader's wifi and check the followers keep turning their"
+            echo "   own pages - that is the behaviour worth testing before you rely on it."
+            echo
+
+            echo "## Changes"
+            echo
+            if [ -n "$previous" ] && git rev-parse -q --verify "refs/tags/$previous" >/dev/null; then
+              echo "Since \`$previous\`:"
+              echo
+              git log --no-merges --pretty=format:'- %s' -n 60 "refs/tags/${previous}..HEAD"
+              echo
+            else
+              echo "Recent commits:"
+              echo
+              git log --no-merges --pretty=format:'- %s' -20
+              echo
+            fi
+          } > release-notes.md
+
+          echo "Composed notes:"
+          cat release-notes.md
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            "${{ steps.meta.outputs.tag }}"
+            --target "${{ github.sha }}"
+            --title "${{ steps.meta.outputs.title }}"
+            --notes-file release-notes.md
+          )
+          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}" dist/*
+
+          echo "### Published [${{ steps.meta.outputs.tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.meta.outputs.tag }})" >> "$GITHUB_STEP_SUMMARY"

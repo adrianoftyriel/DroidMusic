@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="setlists/" />
+        <include domain="shared_pref" path="." />
+        <exclude domain="file" path="managed/" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- A phone-to-phone transfer can afford to carry the charts too. -->
+        <include domain="file" path="." />
+        <include domain="shared_pref" path="." />
+    </device-transfer>
+</data-extraction-rules>

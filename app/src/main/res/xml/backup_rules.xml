@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!--
+      Set lists and settings are worth restoring onto a new phone. The chart
+      cache is not: it can be large, and every file in it can be fetched again
+      from the source it came from.
+    -->
+    <include domain="file" path="setlists/" />
+    <include domain="shared_pref" path="." />
+    <exclude domain="file" path="cache/" />
+    <exclude domain="file" path="managed/" />
+</full-backup-content>
