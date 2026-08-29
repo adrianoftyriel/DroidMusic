@@ -24,7 +24,7 @@ Silent failures need tests, and tests need to be cheap enough that they are run
 constantly. Splitting the core out means:
 
 ```sh
-./gradlew -PcoreOnly coreTests      # 103 tests, no Android SDK, seconds
+./gradlew -PcoreOnly coreTests      # 105 tests, no Android SDK, seconds
 ```
 
 which runs on any machine with a JDK, gates the APK build in CI, and gives a

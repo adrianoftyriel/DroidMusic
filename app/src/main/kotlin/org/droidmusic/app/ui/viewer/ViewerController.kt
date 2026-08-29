@@ -227,12 +227,20 @@ class ViewerController(
         return true
     }
 
-    fun setTranspose(semitones: Int) {
+    /**
+     * Named `chooseTranspose` rather than `setTranspose`, and `chooseCapo`
+     * rather than `setCapo`, because `capo` and `transposeSemitones` are
+     * observable properties: Kotlin already generates `setCapo(int)` for the
+     * property, and a method of the same name is the same JVM signature twice.
+     * The names also read better for what they are - the player picking a key,
+     * not a field being assigned.
+     */
+    fun chooseTranspose(semitones: Int) {
         transposeSemitones = ((semitones + 6).mod(12)) - 6
         applyTranspose()
     }
 
-    fun setCapo(fret: Int) {
+    fun chooseCapo(fret: Int) {
         capo = fret.coerceIn(0, 11)
         applyTranspose()
     }
@@ -240,7 +248,7 @@ class ViewerController(
     fun transposeToKey(target: Key) {
         val from = chartSource?.current?.fromKey ?: return
         val up = Math.floorMod(target.pitchClass - from.pitchClass, 12)
-        setTranspose(if (up > 6) up - 12 else up)
+        chooseTranspose(if (up > 6) up - 12 else up)
     }
 
     private fun applyTranspose() {

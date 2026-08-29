@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list
-and band-sync layers are covered by 103 tests that run on a plain JVM; the app
+and band-sync layers are covered by 105 tests that run on a plain JVM; the app
 layer adds its own.
 
 The one thing not yet verified on real hardware is the app itself — see
@@ -212,7 +212,10 @@ APK nobody can install is not safer, just less useful.
 Being specific about this, because "it builds" and "it works on stage" are
 different claims.
 
-**Tested, by 103 automated tests on the JVM:**
+**Tested, by 105 automated tests on the JVM.** Two of these found real bugs
+during development — the pagination budget check caught a page-break rule that
+could overflow a short viewport, and the chord-word test caught a parser that
+would have rewritten the word "Add" as a chord.
 
 | Area | What is covered |
 |---|---|
@@ -222,7 +225,7 @@ different claims.
 | Transposition | Whole-chart spelling consistency; slash basses; capo semantics; round trips at all 11 intervals |
 | Key detection | Major, minor, flat keys; survives transposition to all 12 keys; confidence ordering |
 | Analysis | Non-diatonic chords; capo suggestions; tab detection |
-| Pagination | No page over budget; no row lost or duplicated at any page size; headers never orphaned |
+| Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned |
 | Set lists | Reorder, JSON round trip, malformed input, cross-device matching |
 | Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases |
 | Tap zones | The exact 1/3–2/3 split; mirroring; the controls band |

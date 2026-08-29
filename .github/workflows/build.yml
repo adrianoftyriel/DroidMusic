@@ -177,6 +177,33 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      # The last thing in the job, so that whatever went wrong is the last thing
+      # in the log. Everything above this - the artifact upload, the Gradle cache
+      # save, the runner's own cleanup - adds a hundred lines after the failure,
+      # which is exactly enough to push the actual error off the end of the log
+      # tail that anyone or anything reads first.
+      - name: What failed
+        if: failure()
+        shell: bash
+        run: |
+          echo "===================== FAILURE SUMMARY ====================="
+          if [ -f compile.log ]; then
+            grep -E "^e: " compile.log \
+              | sed 's|file:///home/runner/work/DroidMusic/DroidMusic/||' \
+              | sort -u || echo "(no compiler errors; the failure was later)"
+          fi
+          for report in app/build/reports/lint-results-release.txt; do
+            [ -f "$report" ] && sed -n '1,40p' "$report"
+          done
+          find app/build/test-results -name '*.xml' -print0 2>/dev/null \
+            | xargs -0 grep -l "<failure" 2>/dev/null \
+            | head -5 \
+            | while read -r f; do
+                echo "--- failing test: $f"
+                grep -o 'message="[^"]*"' "$f" | head -3
+              done
+          echo "==========================================================="
+
     outputs:
       signed: ${{ steps.signing.outputs.signed }}
 

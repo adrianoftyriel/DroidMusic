@@ -187,7 +187,7 @@ private fun TransposeControls(controller: ViewerController, unicodeAccidentals: 
                         else -> target.toString()
                     },
                     selected = controller.transposeSemitones == semitones,
-                    onClick = { controller.setTranspose(semitones) },
+                    onClick = { controller.chooseTranspose(semitones) },
                 )
             }
         }
@@ -202,7 +202,7 @@ private fun TransposeControls(controller: ViewerController, unicodeAccidentals: 
                 ChoicePill(
                     text = if (fret == 0) "off" else "$fret",
                     selected = controller.capo == fret,
-                    onClick = { controller.setCapo(fret) },
+                    onClick = { controller.chooseCapo(fret) },
                 )
             }
         }
@@ -253,7 +253,7 @@ private fun AnalysisSummary(
                     ChoicePill(
                         text = "${suggestion.fret} - play in ${suggestion.playedKey}",
                         selected = false,
-                        onClick = { controller.setCapo(suggestion.fret) },
+                        onClick = { controller.chooseCapo(suggestion.fret) },
                     )
                 }
             }
