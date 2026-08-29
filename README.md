@@ -17,7 +17,8 @@ result the way an arranger would write it.
 and band-sync layers are covered by 105 tests that run on a plain JVM; the app
 layer adds its own.
 
-The one thing not yet verified on real hardware is the app itself — see
+CI builds an installable APK and an AAB from a clean checkout on every push.
+What has *not* happened is anyone running it on a phone — see
 [What has and has not been tested](#what-has-and-has-not-been-tested), which is
 worth reading before relying on this at a gig.
 
@@ -232,8 +233,10 @@ would have rewritten the word "Add" as a chord.
 | Foot switches | Auto-repeat; contact bounce; unmapped keys passed back to the system; learn mode |
 | Page layout | Spread parity; end and start detection; zero-page documents |
 
-**Not yet tested on real hardware.** Nobody has run this on a phone. In
-particular these need a device and are not covered by any test:
+**Built, but not yet run on a phone.** CI produces a signed-and-installable
+APK and an AAB from a clean checkout — the app compiles, lint passes, and both
+unit suites are green. Nobody has installed it. These need a device and are
+covered by no test:
 
 - Whether specific pedals send what the defaults expect.
 - Whether a given cloud provider lists a large folder quickly enough to be
