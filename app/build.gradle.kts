@@ -95,9 +95,28 @@ android {
 
     lint {
         warningsAsErrors = false
-        // A lint failure must not be the reason a band cannot get a build.
+
+        // Lint errors do fail the build. It has already caught a backup rule
+        // that named a domain that does not exist and an intent filter that
+        // claimed URLs the app cannot open - both invisible until a user hit
+        // them - so it is earning the interruption.
         abortOnError = true
-        disable += setOf("MissingTranslation", "UnusedResources")
+
+        // A machine-readable report, so CI can print the errors rather than the
+        // several hundred lines of explanatory prose lint writes to stdout.
+        textReport = true
+        textOutput = file("build/reports/lint-results-release.txt")
+
+        disable += setOf(
+            "MissingTranslation",
+            "UnusedResources",
+            // "A newer version of X is available". True of every pinned
+            // dependency the moment it is pinned, and not something to be told
+            // on every build; version bumps are a deliberate act here.
+            "GradleDependency",
+            "AndroidGradlePluginVersion",
+            "OldTargetApi",
+        )
     }
 
     testOptions {

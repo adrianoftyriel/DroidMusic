@@ -137,7 +137,9 @@ jobs:
           }
 
       - name: Lint
-        run: ./gradlew :app:lintRelease
+        run: |
+          set -o pipefail
+          ./gradlew :app:lintRelease 2>&1 | tee lint.log
 
       - name: Unit tests
         run: ./gradlew test
@@ -192,8 +194,14 @@ jobs:
               | sed 's|file:///home/runner/work/DroidMusic/DroidMusic/||' \
               | sort -u || echo "(no compiler errors; the failure was later)"
           fi
-          for report in app/build/reports/lint-results-release.txt; do
-            [ -f "$report" ] && sed -n '1,40p' "$report"
+          # Only the error lines. Lint writes several hundred lines of
+          # explanation around them, which is what buried the actual problem
+          # the first three times this failed.
+          for report in app/build/reports/lint-results-release.txt lint.log; do
+            [ -f "$report" ] || continue
+            grep -E ": (Error|error):" "$report" \
+              | sed 's|/home/runner/work/DroidMusic/DroidMusic/||' \
+              | sort -u | head -20 && break
           done
           find app/build/test-results -name '*.xml' -print0 2>/dev/null \
             | xargs -0 grep -l "<failure" 2>/dev/null \
