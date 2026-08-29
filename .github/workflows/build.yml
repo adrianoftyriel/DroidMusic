@@ -55,7 +55,7 @@ jobs:
       # never touches the Android toolchain. It is also the command a contributor
       # runs on a laptop with no SDK installed.
       - name: Run the core suites
-        run: ./gradlew -PcoreOnly coreTests --stacktrace
+        run: ./gradlew -PcoreOnly coreTests
 
       - name: Publish the report
         if: always()
@@ -116,19 +116,39 @@ jobs:
             echo "::notice::No signing key configured; the release APK will be debug-signed."
           fi
 
+      # Compile first, on its own, so a compile error is reported as a compile
+      # error rather than as a lint task that happened to fail.
+      #
+      # The `tee` and the trailing grep exist because Gradle prints compiler
+      # errors *before* a hundred and fifty lines of its own stack trace, which
+      # puts them off the end of anything that reads the tail of a log - the
+      # GitHub UI, the API, and a person in a hurry. Repeating them at the end
+      # costs nothing and turns "scroll up and hunt" into "read the last line".
+      - name: Compile
+        run: |
+          set -o pipefail
+          ./gradlew :app:compileReleaseKotlin :app:compileDebugKotlin 2>&1 | tee compile.log || {
+            echo "::group::Compiler errors"
+            grep -E "^e: |^w: .*error" compile.log | sed 's|file:///home/runner/work/DroidMusic/DroidMusic/||' || true
+            echo "::endgroup::"
+            grep -E "^e: " compile.log | sed 's|file:///home/runner/work/DroidMusic/DroidMusic/||' \
+              | sed 's/^/::error::/' || true
+            exit 1
+          }
+
       - name: Lint
-        run: ./gradlew :app:lintRelease --stacktrace
+        run: ./gradlew :app:lintRelease
 
       - name: Unit tests
-        run: ./gradlew test --stacktrace
+        run: ./gradlew test
 
       - name: Assemble
-        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+        run: ./gradlew :app:assembleDebug :app:assembleRelease
 
       # A release AAB as well, so the same run can feed Play without a second
       # build from a different commit.
       - name: Bundle
-        run: ./gradlew :app:bundleRelease --stacktrace
+        run: ./gradlew :app:bundleRelease
 
       - name: Collect artefacts
         shell: bash

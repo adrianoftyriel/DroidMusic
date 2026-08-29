@@ -3,7 +3,6 @@ package org.droidmusic.app.net
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.os.Build
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -97,9 +96,7 @@ class SessionDiscovery(context: Context) {
             this.serviceName = sessionName
             this.serviceType = SERVICE_TYPE
             this.port = port
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                setAttribute(ATTR_LEADER, leaderName)
-            }
+            setAttribute(ATTR_LEADER, leaderName)
         }
 
         val listener = object : NsdManager.RegistrationListener {

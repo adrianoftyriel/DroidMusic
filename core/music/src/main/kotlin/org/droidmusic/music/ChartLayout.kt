@@ -102,16 +102,25 @@ object ChartLayout {
             index++
 
             // Having just placed a header, check something can follow it here.
+            // If not, move the header to the next page along with its first
+            // line - but only if the two of them actually fit there. Without
+            // that second condition the rule happily builds an over-budget page
+            // on a short viewport, which is worse than the orphan it was
+            // avoiding: an orphaned heading is untidy, an overflowing page hides
+            // a line of the song off the bottom of the screen.
             if (row.kind == RowKind.HEADER) {
                 val next = rows.getOrNull(index)
-                if (next != null && next.kind != RowKind.BLANK && used + next.height > perPage) {
+                val orphaned = next != null && next.kind != RowKind.BLANK &&
+                    used + next.height > perPage
+                val bothFitOnAFreshPage = next != null && row.height + next.height <= perPage
+                if (orphaned && bothFitOnAFreshPage && page.size > 1) {
                     page.removeAt(page.size - 1)
                     used -= row.height
                     flush()
                     page += row
                     used += row.height
                     index++
-                    page += next
+                    page += next!!
                     used += next.height
                 }
             }

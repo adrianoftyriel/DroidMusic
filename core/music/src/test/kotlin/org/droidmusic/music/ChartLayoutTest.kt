@@ -127,3 +127,48 @@ class ChartLayoutTest {
         assertEquals(28f, ChartLayout.fitFontSize(0, 400f, 0.6f), 0.001f)
     }
 }
+
+/**
+ * The header-orphan rule pulls a heading forward onto the next page when its
+ * first line would not fit beneath it. That move has to respect the page budget
+ * as well, which is only visible at small page sizes.
+ */
+class ChartLayoutHeaderEdgeTest {
+
+    @Test
+    fun `pulling a header forward never overflows the page`() {
+        val input = listOf(
+            ChartRow(RowKind.LYRIC, text = "a"),
+            ChartRow(RowKind.HEADER, text = "Chorus"),
+            ChartRow(RowKind.CHORD_AND_LYRIC, "C", "the chorus"),
+            ChartRow(RowKind.CHORD_AND_LYRIC, "G", "more of it"),
+        )
+        for (perPage in 1..8) {
+            for (page in ChartLayout.paginate(input, perPage)) {
+                assertTrue(
+                    "perPage=$perPage produced a page of ${page.sumOf { it.height }} lines",
+                    page.sumOf { it.height } <= perPage.coerceAtLeast(2),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `no row is lost when a header is pulled forward`() {
+        val input = listOf(
+            ChartRow(RowKind.LYRIC, text = "a"),
+            ChartRow(RowKind.HEADER, text = "Chorus"),
+            ChartRow(RowKind.CHORD_AND_LYRIC, "C", "the chorus"),
+            ChartRow(RowKind.LYRIC, text = "b"),
+            ChartRow(RowKind.HEADER, text = "Bridge"),
+            ChartRow(RowKind.CHORD_AND_LYRIC, "F", "the bridge"),
+        )
+        for (perPage in 1..10) {
+            assertEquals(
+                "perPage=$perPage",
+                input,
+                ChartLayout.paginate(input, perPage).flatten(),
+            )
+        }
+    }
+}

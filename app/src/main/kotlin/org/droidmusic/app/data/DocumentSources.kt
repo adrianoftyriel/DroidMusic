@@ -225,10 +225,31 @@ object DocumentSources {
         }
     }
 
+    /**
+     * Reads a text chart, up to [maxBytes].
+     *
+     * The read loop is written out rather than using `InputStream.readNBytes`,
+     * which is a Java 9 API and does not reach Android until API 33 - on a
+     * minSdk 26 build that is a crash on most devices in the field, not a
+     * compile error.
+     *
+     * The cap matters: this runs over every text file in a folder the user
+     * chose, and one of them being a 200MB log somebody dropped in there should
+     * cost a truncated chart, not the process.
+     */
     fun readText(resolver: ContentResolver, uri: Uri, maxBytes: Int = 2 * 1024 * 1024): String? =
         runCatching {
             resolver.openInputStream(uri)?.use { stream ->
-                String(stream.readNBytes(maxBytes), Charsets.UTF_8)
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(32 * 1024)
+                var total = 0
+                while (total < maxBytes) {
+                    val read = stream.read(buffer, 0, minOf(buffer.size, maxBytes - total))
+                    if (read <= 0) break
+                    out.write(buffer, 0, read)
+                    total += read
+                }
+                String(out.toByteArray(), Charsets.UTF_8)
             }
         }.getOrNull()
 
