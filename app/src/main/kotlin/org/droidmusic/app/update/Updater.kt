@@ -2,6 +2,7 @@ package org.droidmusic.app.update
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.core.content.FileProvider
@@ -220,6 +221,110 @@ object Updater {
     /** The Settings page where that permission is granted. */
     fun unknownSourcesIntent(context: Context): Intent = Intent(
         Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+        Uri.parse("package:${context.packageName}"),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+    /**
+     * Who signed an APK on disk, and what it calls itself.
+     *
+     * Read before offering to install it, so that an install which cannot
+     * possibly succeed is explained here rather than by Android's installer,
+     * which says only "App not installed as package conflicts with an existing
+     * package" and leaves the player to guess which package and what conflict.
+     */
+    data class ArchiveIdentity(
+        val packageName: String?,
+        val versionName: String?,
+        val signers: Set<String>,
+    )
+
+    /** Why a downloaded APK will not install over what is already here. */
+    enum class InstallConflict {
+        /**
+         * Signed with a different key. Android refuses this outright: an app can
+         * only be replaced by a package proving it came from the same signer.
+         * Nothing but uninstalling first gets past it, and uninstalling takes
+         * this app's data with it.
+         */
+        DIFFERENT_SIGNER,
+
+        /**
+         * A different application id, so it would install *beside* this app
+         * rather than update it, and the player would end up with two
+         * DroidMusics and one empty library.
+         */
+        DIFFERENT_PACKAGE,
+    }
+
+    fun identify(context: Context, file: File): ArchiveIdentity? = runCatching {
+        val flags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, flags)
+            ?: return@runCatching null
+        ArchiveIdentity(info.packageName, info.versionName, signersOf(info))
+    }.getOrNull()
+
+    /** Who signed the copy of this app that is running. */
+    fun installedSigners(context: Context): Set<String> = runCatching {
+        val flags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        signersOf(context.packageManager.getPackageInfo(context.packageName, flags))
+    }.getOrDefault(emptySet())
+
+    /**
+     * Compares the two. Returns null when the install should work, and null also
+     * when we could not read one of them - an unreadable signature is not
+     * evidence of a conflict, and claiming one would stop a perfectly good
+     * update.
+     */
+    fun conflictWith(context: Context, file: File): InstallConflict? {
+        val archive = identify(context, file) ?: return null
+        if (archive.packageName != null && archive.packageName != context.packageName) {
+            return InstallConflict.DIFFERENT_PACKAGE
+        }
+        val installed = installedSigners(context)
+        if (installed.isEmpty() || archive.signers.isEmpty()) return null
+        return if (installed.intersect(archive.signers).isEmpty()) {
+            InstallConflict.DIFFERENT_SIGNER
+        } else {
+            null
+        }
+    }
+
+    /**
+     * The SHA-256 of each signing certificate.
+     *
+     * Both the current signers and the rotation history are taken, because a key
+     * that has been rotated still legitimately replaces the app it was rotated
+     * from, and treating that as a conflict would block a real update.
+     */
+    private fun signersOf(info: android.content.pm.PackageInfo): Set<String> {
+        val certificates = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            val signing = info.signingInfo ?: return emptySet()
+            signing.apkContentsSigners.orEmpty().toList() +
+                signing.signingCertificateHistory.orEmpty().toList()
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures.orEmpty().toList()
+        }
+        return certificates.filterNotNull()
+            .map { MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).toHex() }
+            .toSet()
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+    /** The app's own settings page, which is where an uninstall is done. */
+    fun appInfoIntent(context: Context): Intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
         Uri.parse("package:${context.packageName}"),
     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 

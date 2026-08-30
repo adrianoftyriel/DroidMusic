@@ -207,6 +207,49 @@ jobs:
       - name: Bundle
         run: ./gradlew :app:bundleRelease
 
+      # Which key actually signed the APK, read back out of the APK rather than
+      # assumed from whether a keystore was configured.
+      #
+      # This exists because the failure it surfaces was invisible for three
+      # releases: with no signing secrets the release APK falls back to the debug
+      # keystore, and a fresh runner has no debug keystore, so AGP generates a new
+      # one *per run*. Every release was therefore signed by a different key and
+      # none could update any other - which presents on a phone as "conflicts with
+      # an existing package" and nothing else.
+      #
+      # Printing the fingerprint into the release notes makes "can this build
+      # update that one" a thing anybody can check by looking.
+      - name: Read the signing certificate
+        id: fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk=$(find app/build/outputs -name '*release*.apk' | head -1)
+          if [ -z "$apk" ]; then
+            echo "::error::No release APK to read a signature from"
+            exit 1
+          fi
+
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          if [ -z "$apksigner" ]; then
+            echo "::warning::apksigner not found; skipping the fingerprint"
+            echo "fingerprint=unknown" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # SHA-256 of the signing certificate, which is what Android compares.
+          digest=$("$apksigner" verify --print-certs "$apk" \
+            | sed -n 's/.*SHA-256 digest: *\([0-9a-fA-F]*\).*/\1/p' | head -1)
+          digest=${digest:-unknown}
+
+          echo "fingerprint=$digest" >> "$GITHUB_OUTPUT"
+          echo "Release APK signing certificate SHA-256: $digest"
+
+          if [ "${{ steps.signing.outputs.signed }}" != "true" ]; then
+            echo "::warning::This APK is debug-signed with a key generated for this run. It cannot update, or be updated by, any other release. Set ANDROID_KEYSTORE_BASE64 and friends to fix this."
+          fi
+
       - name: Collect artefacts
         shell: bash
         run: |
@@ -273,6 +316,7 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       title: ${{ steps.release.outputs.title }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
 
   # ---------------------------------------------------------------------------
   # Publishing. Gated on the build, so a release can only ever contain artifacts
@@ -396,11 +440,25 @@ jobs:
             echo
 
             if [ "${{ needs.build.outputs.signed }}" != "true" ]; then
-              echo "> **This build is signed with the debug key**, because no release signing key is"
-              echo "> configured for this repository. It installs and runs normally, but it cannot be"
-              echo "> upgraded in place from a release-signed build - uninstall first if you have one."
+              echo "> [!WARNING]"
+              echo "> **This build cannot update any other build, and no other build can update it.**"
+              echo ">"
+              echo "> No release signing key is configured for this repository, so the APK is signed"
+              echo "> with the Android debug key - and a fresh CI runner generates a *new* debug key"
+              echo "> every run. Android only lets an app be replaced by a package signed with the"
+              echo "> same key, so every release here is a separate, unrelated app as far as the"
+              echo "> installer is concerned."
+              echo ">"
+              echo "> Installing this over an existing DroidMusic fails with \"conflicts with an"
+              echo "> existing package\". Uninstall first - which erases set lists and the list of"
+              echo "> added folders - or set the signing secrets described in the README so that"
+              echo "> releases share a key and can update each other."
               echo
             fi
+
+            echo "Signing certificate: \`${{ needs.build.outputs.fingerprint }}\`. Only builds"
+            echo "showing this same fingerprint can update one another."
+            echo
 
             echo "Minimum Android 8.0 (API 26). Phones and tablets, portrait and landscape."
             echo

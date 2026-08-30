@@ -163,9 +163,14 @@ Three things it is careful about, because each is silent when it goes wrong:
   Android's own rule that an app cannot be replaced by a package signed with a
   different key.
 
-That last rule has a consequence worth knowing before relying on any of this: a
-CI build made **without** signing secrets is debug-signed, and cannot update — or
-be updated by — a release-signed one. The install just fails. Details in
+That last rule has a consequence worth knowing before relying on any of this,
+and it currently bites: a CI build made **without** signing secrets is signed
+with a debug key generated fresh for that run, so it cannot update — or be
+updated by — anything, including the previous pre-release. The app now detects
+this before offering the install and explains it, rather than letting Android
+report "conflicts with an existing package" and leaving you to guess. Fixing it
+for good means configuring a signing key; see
+[Signing](#signing-and-why-it-is-not-optional-any-more) and
 [docs/DESIGN.md](docs/DESIGN.md).
 
 ### Band-leader mode
@@ -264,10 +269,35 @@ produced. The version lives in `gradle.properties` and nowhere else; merging to
 `main` with a version that already has a release fails the run rather than
 replacing an APK somebody has installed.
 
+### Signing, and why it is not optional any more
+
 Set `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
 and `ANDROID_KEY_PASSWORD` as repository secrets to get release-signed builds.
-Without them the release APK is debug-signed and the release notes say so — an
-APK nobody can install is not safer, just less useful.
+
+**Without them, no release can update any other release.** The build falls back
+to the Android debug key, and a fresh CI runner has no debug keystore, so one is
+generated *per run* — every release is therefore signed by a different key.
+Android only lets an app be replaced by a package signed with the same key, so
+each build is an unrelated app as far as the installer is concerned, and
+installing one over another fails with "conflicts with an existing package".
+
+The builds still install and run perfectly well on a device with no DroidMusic on
+it; it is only replacement that is impossible. Each release prints its signing
+certificate fingerprint in its own notes, so whether two builds can update one
+another is something you can check by looking.
+
+To fix it permanently:
+
+```sh
+keytool -genkeypair -v -keystore droidmusic.jks -alias droidmusic \
+  -keyalg RSA -keysize 4096 -validity 10000
+
+base64 -w0 droidmusic.jks       # the value for ANDROID_KEYSTORE_BASE64
+```
+
+Keep that keystore. Losing it means never being able to update an installed copy
+again. The first properly signed release still cannot replace a debug-signed one
+already on a phone — that install needs an uninstall first, once.
 
 ---
 

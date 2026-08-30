@@ -353,12 +353,37 @@ wifi, or a captive portal that answered with a login page and a 200. Those arriv
 as an APK that fails to install with a message explaining nothing. A release with
 no checksum file is reported as unverified rather than quietly accepted.
 
-The honest consequence of the signing rule, stated in the UI as well as here: an
-APK built by CI *without* signing secrets is debug-signed, and cannot update or be
-updated by a release-signed one. And the debug build carries a `.debug`
-application id, so installing a release APK over it would add a second DroidMusic
-rather than update the first — which is why the updater refuses to run on a debug
-build instead of doing that to somebody.
+The honest consequence of the signing rule, and it is worse than it first looks.
+With no signing secrets configured, the release build falls back to the Android
+debug key — and a fresh CI runner has no debug keystore, so the Android Gradle
+Plugin generates **a new one every run**. Three releases were published that way
+before anybody tried to update between two of them, and each was signed by a
+different key: `v0.1.0-dev.12` and `v0.1.0-dev.15` carry certificates whose
+`notBefore` timestamps are their own build times. No release could update any
+other, and the only symptom is Android saying "conflicts with an existing
+package".
+
+Two things follow, and both are now built in:
+
+- **CI reads the fingerprint back out of the assembled APK** and prints it in the
+  release notes, so "can this build update that one" is answerable by looking
+  rather than by trying. When the key is a per-run debug key, the notes say so in
+  a warning rather than a footnote.
+- **The app checks before it offers.** Once an APK is downloaded, its signing
+  certificate is compared with the running app's, and a mismatch is explained
+  where it happens: what Android is about to refuse, why the rule exists, that
+  the only way through is an uninstall, and that an uninstall takes the set lists
+  and the folder list with it. Android's own wording names neither the package
+  nor the conflict, and reads to everybody as "the app is broken".
+
+The real fix is a signing key in the repository's secrets, which the workflow has
+always supported; see the README. Note that even after that, the first properly
+signed release cannot replace a debug-signed one already installed. That one
+install needs an uninstall first.
+
+Separately, the debug *build type* carries a `.debug` application id, so a release
+APK would install beside it rather than over it — which is why the updater
+refuses to run on a debug build instead of doing that to somebody.
 
 ### Nothing happens on its own
 
