@@ -46,6 +46,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.droidmusic.app.ui.common.EmptyState
@@ -286,11 +287,14 @@ fun SetlistDetailScreen(
                                 else -> controller.save(saved.copy(entries = order))
                             }
                         }
+                        // Opaque only while it is in the air, so a lifted row
+                        // hides the ones sliding under it and an ordinary row
+                        // still sits on the screen's own colour.
                         .background(
                             if (dragging) {
                                 MaterialTheme.colorScheme.surfaceVariant
                             } else {
-                                MaterialTheme.colorScheme.surface
+                                Color.Transparent
                             },
                         )
                         .clickable {
