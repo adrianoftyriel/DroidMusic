@@ -21,6 +21,7 @@ sealed interface Screen {
     data object Session : Screen
     data object Settings : Screen
     data object FootSwitchSetup : Screen
+    data object Updates : Screen
 
     /**
      * The viewer, opened either on a single song or on a position in a set list.

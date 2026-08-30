@@ -21,6 +21,18 @@
     -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!--
+      Installing an update the user asked for. Since Android 8 this is granted
+      per app rather than by one global "unknown sources" switch, and it cannot
+      be requested with a runtime dialog - declaring it only makes the app
+      eligible to appear in that Settings page, which the updater links to.
+
+      Nothing is ever downloaded without somebody pressing a button, and the
+      install itself is Android's own, with its own confirmation. See
+      org.droidmusic.app.update.Updater.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

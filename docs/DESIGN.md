@@ -6,8 +6,8 @@ Why each choice was made, including the ones that were nearly made differently.
 
 ## 1. Why the core is not an Android module
 
-Three of the four modules — `:core:music`, `:core:library`, `:core:session` —
-have no Android dependency at all. That is not architectural tidiness for its
+Four of the five modules — `:core:music`, `:core:library`, `:core:session`,
+`:core:update` — have no Android dependency at all. That is not architectural tidiness for its
 own sake; it comes from what is in them.
 
 The parts of this app where being wrong is **loud** are all in the Android
@@ -24,7 +24,7 @@ Silent failures need tests, and tests need to be cheap enough that they are run
 constantly. Splitting the core out means:
 
 ```sh
-./gradlew -PcoreOnly coreTests      # 105 tests, no Android SDK, seconds
+./gradlew -PcoreOnly coreTests      # 154 tests, no Android SDK, seconds
 ```
 
 which runs on any machine with a JDK, gates the APK build in CI, and gives a
@@ -285,7 +285,94 @@ rather than leaving it to be discovered on a stand.
 
 ---
 
-## 6. Band-leader mode
+## 6. Updating the app from inside the app
+
+There is no Play Store listing, so an update is a downloaded APK and a system
+install prompt. That is a small feature with three sharp edges, and each of them
+is a decision rather than an accident.
+
+### The version the app thinks it is
+
+Every pre-release cut from `dev` is built from the same `gradle.properties`, so
+all of them carry `versionName 0.1.0`. An updater that compared version *names*
+would find `0.1.0` on both sides forever and report "up to date" to a player
+eleven builds behind.
+
+So the identity is the **tag** — `v0.1.0-dev.12` — and CI stamps it into the APK
+as a `BuildConfig` field. The tag is computed in the build job, before anything
+is compiled, and the publish job then uses that same string rather than
+recomputing it. Two copies of that arithmetic drifting apart would produce an app
+convinced it is a release nobody published, which for an updater is a loop: it
+checks, does not match, installs, and still does not match.
+
+A build that CI did not make has no tag, and says "built from source" rather than
+claiming to be the release of that name.
+
+### Comparing two versions is not comparing two strings
+
+`v0.1.0-dev.9` and `v0.1.0-dev.10`. As text the first sorts second, and a player
+on dev.9 is told they are current — and goes on being told that for the next
+ninety releases. Nothing about that failure is visible.
+
+So versions are parsed into a numeric core plus pre-release identifiers and
+compared by SemVer's rules: numeric identifiers numerically, and a version
+carrying a pre-release suffix ranking *below* the same version without one, so
+that publishing `v0.1.0` reads as an upgrade to everyone on a dev build. It is a
+pure function in `:core:update` with a test file to itself, for the same reason
+the transposer is: being wrong here is silent.
+
+The newest release is chosen **by version, not by the order GitHub returned**.
+GitHub sorts by creation time, which is usually the same ordering and is not the
+same thing — a release re-published after deletion, or cut from an older commit,
+arrives out of order and would otherwise be offered as an upgrade to somebody
+already past it.
+
+Going backwards is never offered. Android would allow it: every dev build has the
+same `versionCode`, so the installer sees a reinstall rather than a downgrade and
+raises no objection. The check in this app is the only thing standing between a
+player and being walked backwards, which is why the downgrade case is a test.
+
+`versionCode` is deliberately **not** bumped per pre-release. It would make the
+platform enforce the ordering too, and it would also mean that publishing
+`v0.1.0` — versionCode 1 — to somebody running dev build number 12 would be
+refused by Android as a downgrade. The two schemes cannot both be monotonic, and
+the one that has to work is release-follows-pre-release.
+
+### What actually makes the install safe
+
+Not the download, and not the checksum. **Android refuses to replace an installed
+app with a package signed by a different key**, and that refusal is the security
+boundary: a substituted APK cannot become the DroidMusic on somebody's phone, it
+can only fail to install.
+
+The `SHA256SUMS.txt` published with each release is checked, and it is an
+*integrity* check, not a signature — the checksum comes from the same release as
+the APK, so anyone who could replace one could replace the other. What it earns
+its place catching is the realistic failure: a download truncated by bad venue
+wifi, or a captive portal that answered with a login page and a 200. Those arrive
+as an APK that fails to install with a message explaining nothing. A release with
+no checksum file is reported as unverified rather than quietly accepted.
+
+The honest consequence of the signing rule, stated in the UI as well as here: an
+APK built by CI *without* signing secrets is debug-signed, and cannot update or be
+updated by a release-signed one. And the debug build carries a `.debug`
+application id, so installing a release APK over it would add a second DroidMusic
+rather than update the first — which is why the updater refuses to run on a debug
+build instead of doing that to somebody.
+
+### Nothing happens on its own
+
+No check on launch, no periodic check, no background download, no notification.
+Every request is the direct result of somebody pressing a button.
+
+This is not minimalism. An app that decides to fetch nine megabytes over a
+venue's wifi ninety seconds before the first song has done the worst thing a page
+turner can do, and the only way to be sure it never happens is for there to be no
+code that could start it.
+
+---
+
+## 7. Band-leader mode
 
 ### Absolute positions, not instructions
 
@@ -360,7 +447,7 @@ newline framing is only sound if that holds.
 
 ---
 
-## 7. The viewer
+## 8. The viewer
 
 ### Tap zones
 
@@ -418,7 +505,7 @@ syllable and the words open up a little.
 
 ---
 
-## 8. Foot switches
+## 9. Foot switches
 
 The thing that makes this tractable is that both Bluetooth and USB pedals
 present themselves to Android as HID keyboards. By the time the app sees
@@ -451,7 +538,7 @@ it does not also scroll something.
 
 ---
 
-## 9. Storage
+## 10. Storage
 
 Settings, set lists and the file index are JSON files, not a database.
 
@@ -475,7 +562,7 @@ and a random UUID does that perfectly.
 
 ---
 
-## 10. Things deliberately not built
+## 11. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent

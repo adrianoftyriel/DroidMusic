@@ -28,6 +28,7 @@ rootProject.name = "DroidMusic"
 include(":core:music")
 include(":core:library")
 include(":core:session")
+include(":core:update")
 
 // `-PcoreOnly` leaves the Android module out of the build entirely, so the core
 // tests can be run on a machine with no Android SDK - which is most machines,
