@@ -166,7 +166,12 @@ class FileKindTest {
         assertEquals(FileKind.CHORDPRO, SongRef.kindOf("song.pro"))
         assertEquals(FileKind.CHORDPRO, SongRef.kindOf("song.cho"))
         assertEquals(FileKind.TEXT, SongRef.kindOf("riff.tab"))
-        assertEquals(FileKind.UNKNOWN, SongRef.kindOf("notes.docx"))
+        assertEquals(FileKind.DOCX, SongRef.kindOf("notes.docx"))
+
+        // The old binary format is not read - see DocxText. Saying so here keeps
+        // a later "well, .doc is nearly the same thing" from being an easy edit.
+        assertEquals(FileKind.UNKNOWN, SongRef.kindOf("notes.doc"))
+        assertEquals(FileKind.UNKNOWN, SongRef.kindOf("band.zip"))
     }
 
     @Test
@@ -181,6 +186,7 @@ class FileKindTest {
         fun ref(name: String) = SongRef("i", "s", "u", name, SongRef.kindOf(name))
         assertTrue(ref("song.pro").isTransposable)
         assertTrue(ref("song.txt").isTransposable)
+        assertTrue(ref("song.docx").isTransposable)
         assertFalse(ref("song.pdf").isTransposable)
         assertFalse(ref("song.png").isTransposable)
     }

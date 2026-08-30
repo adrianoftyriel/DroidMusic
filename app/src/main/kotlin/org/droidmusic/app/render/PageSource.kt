@@ -261,12 +261,21 @@ class ChartPageSource(
     companion object {
         const val DEFAULT_LINES_PER_PAGE = 30
 
-        suspend fun open(context: Context, uri: Uri, unicodeAccidentals: Boolean): ChartPageSource? =
-            withContext(Dispatchers.IO) {
-                val text = org.droidmusic.app.data.DocumentSources
-                    .readText(context.contentResolver, uri) ?: return@withContext null
-                ChartPageSource(SongParser.parse(text), unicodeAccidentals)
-            }
+        /**
+         * [kind] is passed rather than sniffed because a Word document has to be
+         * unzipped before there is any text to sniff. Everything after that point
+         * is identical for every text chart - see DocumentSources.readChartText.
+         */
+        suspend fun open(
+            context: Context,
+            uri: Uri,
+            kind: FileKind,
+            unicodeAccidentals: Boolean,
+        ): ChartPageSource? = withContext(Dispatchers.IO) {
+            val text = org.droidmusic.app.data.DocumentSources
+                .readChartText(context.contentResolver, uri, kind) ?: return@withContext null
+            ChartPageSource(SongParser.parse(text), unicodeAccidentals)
+        }
     }
 }
 
@@ -284,8 +293,8 @@ object PageSources {
     ): PageSource? = when (song.kind) {
         FileKind.PDF -> PdfPageSource.open(context, Uri.parse(song.uri))
         FileKind.IMAGE -> ImagePageSource(context, listOf(Uri.parse(song.uri)))
-        FileKind.CHORDPRO, FileKind.TEXT ->
-            ChartPageSource.open(context, Uri.parse(song.uri), unicodeAccidentals)
+        FileKind.CHORDPRO, FileKind.TEXT, FileKind.DOCX ->
+            ChartPageSource.open(context, Uri.parse(song.uri), song.kind, unicodeAccidentals)
         FileKind.UNKNOWN -> null
     }
 }

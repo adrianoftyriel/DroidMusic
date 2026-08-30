@@ -9,6 +9,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.droidmusic.library.DocxText
 import org.droidmusic.library.FileKind
 import org.droidmusic.library.SongRef
 import org.droidmusic.library.SourceKind
@@ -44,8 +45,20 @@ import org.droidmusic.music.SongParser
 object DocumentSources {
 
     /**
-     * The picker intent for adding a folder. Any provider on the device shows up
-     * in it, which is the whole point.
+     * The picker intent for adding a folder.
+     *
+     * **Not every provider offers its folders here, and that is not a bug in
+     * this intent.** The system folder picker only lists roots whose provider
+     * declares it can answer "is this document inside this tree"
+     * (`Root.FLAG_SUPPORTS_IS_CHILD`); a provider that does not declare it is
+     * filtered out before this app sees anything. OneDrive is the one people hit
+     * - it appears when picking *files* and not when picking a *folder*, which
+     * looks exactly like the app forgetting to offer it.
+     *
+     * There is no flag to pass that changes this, and no amount of retrying the
+     * picker helps. What the app can do is stop pretending a folder is the only
+     * way in: [pickFilesIntent] reaches every provider, and the library screen
+     * offers it alongside this one rather than only when the library is empty.
      */
     fun pickTreeIntent(): Intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
         addFlags(
@@ -54,13 +67,26 @@ object DocumentSources {
         )
     }
 
-    /** The picker intent for adding individual files. */
+    /**
+     * The picker intent for adding individual files.
+     *
+     * This is also the way into a provider that does not offer folders - see
+     * [pickTreeIntent] - so it is worth it being generous. `application/octet-stream`
+     * is in the list because that is what most providers report for a `.cho` or
+     * a `.pro`, which they have never heard of.
+     */
     fun pickFilesIntent(): Intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
         addCategory(Intent.CATEGORY_OPENABLE)
         type = "*/*"
         putExtra(
             Intent.EXTRA_MIME_TYPES,
-            arrayOf("application/pdf", "text/*", "image/*", "application/octet-stream"),
+            arrayOf(
+                "application/pdf",
+                "text/*",
+                "image/*",
+                SongRef.DOCX_MIME_TYPE,
+                "application/octet-stream",
+            ),
         )
         putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         addFlags(
@@ -82,6 +108,65 @@ object DocumentSources {
         )
         true
     }.getOrDefault(false)
+
+    /**
+     * Hands a grant back when a folder is removed from the library.
+     *
+     * Not tidiness. A persistable grant this app no longer uses still shows up in
+     * Android's own storage-access screens as this app having access to that
+     * folder, which is untrue and unnerving the moment somebody goes looking. And
+     * the platform caps how many an app may hold at once, so a library that has
+     * been rearranged a few times over a couple of years can quietly stop being
+     * able to take a new one.
+     *
+     * URIs that were never persisted are skipped rather than released, because
+     * releasing one that is not held throws - and this runs on a path where the
+     * removal has already happened and there is nothing useful to do about it.
+     */
+    fun releasePermissions(context: Context, uris: List<Uri>) {
+        val held = runCatching {
+            context.contentResolver.persistedUriPermissions.map { it.uri }.toSet()
+        }.getOrDefault(emptySet())
+
+        for (uri in uris) {
+            if (uri !in held) continue
+            runCatching {
+                context.contentResolver.releasePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+    }
+
+    /**
+     * Deletes the copies this app made in its own storage.
+     *
+     * Managed copies are the one kind of file the app owns outright. Nothing
+     * outside it has a reference to them, so forgetting the source they belong to
+     * without deleting them would leave them on the device for good, taking up
+     * the space of a scanned songbook, with nothing left that could ever open
+     * them.
+     *
+     * The parent check is deliberate. This is the only code in the app that
+     * deletes a user's file, and confining it to the managed directory means a
+     * mistake somewhere else - a song row that kept a `file://` URI from
+     * somewhere it should not have - cannot turn into a deleted chart.
+     */
+    fun deleteManagedCopies(context: Context, songs: List<SongRef>) {
+        val managed = runCatching {
+            java.io.File(context.filesDir, "managed").canonicalFile
+        }.getOrNull() ?: return
+
+        for (song in songs) {
+            val uri = Uri.parse(song.uri)
+            if (uri.scheme != "file") continue
+            val path = uri.path ?: continue
+            val file = runCatching { java.io.File(path).canonicalFile }.getOrNull() ?: continue
+            if (file.parentFile != managed) continue
+            runCatching { file.delete() }
+        }
+    }
 
     /** Whether a previously granted source is still readable. */
     fun hasPermission(context: Context, uri: Uri): Boolean =
@@ -208,8 +293,11 @@ object DocumentSources {
                 when {
                     !parseContents -> song
                     song.isTransposable -> {
-                        val text = readText(context.contentResolver, Uri.parse(song.uri))
-                            ?: return@runCatching song
+                        val text = readChartText(
+                            context.contentResolver,
+                            Uri.parse(song.uri),
+                            song.kind,
+                        ) ?: return@runCatching song
                         val parsed = SongParser.parse(text)
                         val analysis = ChartAnalyzer.analyze(parsed)
                         song.copy(
@@ -224,6 +312,21 @@ object DocumentSources {
             }.getOrDefault(song)
         }
     }
+
+    /**
+     * Reads a chart as text, whatever it is stored as.
+     *
+     * The one place that knows a Word document is not a text file. Everything
+     * downstream - the parser, key detection, the transposer, the layout engine -
+     * sees characters and does not care where they came from, which is why DOCX
+     * support is this small: it is a decoder, not a second code path.
+     */
+    fun readChartText(resolver: ContentResolver, uri: Uri, kind: FileKind): String? =
+        if (kind == FileKind.DOCX) readDocx(resolver, uri) else readText(resolver, uri)
+
+    private fun readDocx(resolver: ContentResolver, uri: Uri): String? = runCatching {
+        resolver.openInputStream(uri)?.use { DocxText.extract(it) }
+    }.getOrNull()
 
     /**
      * Reads a text chart, up to [maxBytes].
@@ -342,7 +445,8 @@ object DocumentSources {
     fun providerLabel(authority: String?): String = when {
         authority == null -> "Files"
         authority.contains("google.android.apps.docs") -> "Google Drive"
-        authority.contains("com.microsoft.skydrive") -> "OneDrive"
+        authority.contains("com.microsoft.skydrive") ||
+            authority.contains("onedrive") -> "OneDrive"
         authority.contains("dropbox") -> "Dropbox"
         authority.contains("com.box.android") -> "Box"
         authority.contains("protonmail") || authority.contains("proton.android") -> "Proton Drive"
@@ -350,5 +454,20 @@ object DocumentSources {
         authority.contains("com.android.externalstorage") -> "This device"
         authority.contains("com.android.providers.downloads") -> "Downloads"
         else -> "Files"
+    }
+
+    /**
+     * What to call the bucket that individually picked files land in.
+     *
+     * Named after the provider when there is a recognisable one, because picking
+     * files one at a time is how a service that offers no folders gets used at
+     * all, and "OneDrive files" is then a real place in the library rather than
+     * an anonymous pile. Anything local, or anything unrecognised, stays "Picked
+     * files": "This device files" is not English, and naming a bucket after an
+     * authority string helps nobody.
+     */
+    fun pickedFilesLabel(authority: String?): String = when (val provider = providerLabel(authority)) {
+        "Files", "This device", "Downloads" -> "Picked files"
+        else -> "$provider files"
     }
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.data.SettingsRepository
+import org.droidmusic.library.FileKind
 import org.droidmusic.library.LibraryIndex
 import org.droidmusic.library.SongRef
 import org.droidmusic.library.SourceKind
@@ -50,50 +51,76 @@ class LibraryController(
     /**
      * Adds files picked one at a time.
      *
-     * Grouped under a single synthetic source rather than one source per file,
-     * so that picking forty scans does not produce forty entries in the filter
-     * row.
+     * Grouped by the provider they came from rather than one source per file, so
+     * that picking forty scans does not produce forty entries in the filter row.
+     *
+     * By *provider* and not into one bucket, because picking files one at a time
+     * is how a provider that offers no folders gets used at all - see
+     * [DocumentSources.pickTreeIntent]. Somebody who reaches OneDrive this way
+     * ends up with "OneDrive files" beside their folders, which they can filter
+     * by and, when it comes to it, remove in one go.
      */
     fun addFiles(uris: List<Uri>) {
         scope.launch {
             scanning = true
-            scanStatus = "Adding ${uris.size} files"
+            scanStatus = if (uris.size == 1) "Adding a file" else "Adding ${uris.size} files"
 
-            val source = index.value.sources.firstOrNull { it.kind == SourceKind.EXTERNAL_FILE }
-                ?: SourceRef(
-                    id = UUID.randomUUID().toString(),
-                    kind = SourceKind.EXTERNAL_FILE,
-                    uri = "",
-                    label = "Picked files",
-                    addedAt = System.currentTimeMillis(),
-                ).also { repository.addSource(it) }
+            for ((_, picked) in uris.groupBy { DocumentSources.pickedFilesLabel(it.authority) }) {
+                val source = fileSourceFor(picked.first().authority)
+                val added = picked.mapNotNull { uri ->
+                    DocumentSources.persistPermission(context, uri)
+                    val name = displayName(uri) ?: return@mapNotNull null
+                    val kind = SongRef.kindOf(name, context.contentResolver.getType(uri))
+                    if (kind == FileKind.UNKNOWN) return@mapNotNull null
+                    SongRef(
+                        id = DocumentSources.stableId(source.id, uri.toString()),
+                        sourceId = source.id,
+                        uri = uri.toString(),
+                        displayName = name,
+                        kind = kind,
+                    )
+                }
 
-            val added = uris.mapNotNull { uri ->
-                DocumentSources.persistPermission(context, uri)
-                val name = displayName(uri) ?: return@mapNotNull null
-                val kind = SongRef.kindOf(name, context.contentResolver.getType(uri))
-                if (kind == org.droidmusic.library.FileKind.UNKNOWN) return@mapNotNull null
-                SongRef(
-                    id = DocumentSources.stableId(source.id, uri.toString()),
-                    sourceId = source.id,
-                    uri = uri.toString(),
-                    displayName = name,
-                    kind = kind,
+                val existing = index.value.songsFrom(source.id)
+                val merged = (existing + added).distinctBy { it.uri }
+                val enriched = DocumentSources.enrich(
+                    context,
+                    merged,
+                    settings.settings.value.indexChartContents,
                 )
+                repository.replaceSongsFrom(source.id, enriched, System.currentTimeMillis())
             }
-
-            val existing = index.value.songsFrom(source.id)
-            val merged = (existing + added).distinctBy { it.uri }
-            val enriched = DocumentSources.enrich(
-                context,
-                merged,
-                settings.settings.value.indexChartContents,
-            )
-            repository.replaceSongsFrom(source.id, enriched, System.currentTimeMillis())
 
             scanning = false
             scanStatus = ""
         }
+    }
+
+    /**
+     * The bucket picked files land in, made if it is not there yet.
+     *
+     * Matched on the label rather than on the authority, so that files picked
+     * from two different local providers - Downloads and internal storage, say -
+     * do not produce two pills both saying "Picked files". It also means a
+     * library written by an older build, where everything went into one
+     * unattributed bucket, keeps using that bucket instead of stranding it.
+     */
+    private suspend fun fileSourceFor(authority: String?): SourceRef {
+        val label = DocumentSources.pickedFilesLabel(authority)
+        index.value.sources
+            .firstOrNull { it.kind == SourceKind.EXTERNAL_FILE && it.label == label }
+            ?.let { return it }
+
+        val source = SourceRef(
+            id = UUID.randomUUID().toString(),
+            kind = SourceKind.EXTERNAL_FILE,
+            uri = "",
+            label = label,
+            authority = authority,
+            addedAt = System.currentTimeMillis(),
+        )
+        repository.addSource(source)
+        return source
     }
 
     fun rescanAll() {
@@ -104,8 +131,59 @@ class LibraryController(
         }
     }
 
+    /**
+     * Forgets a folder, or a bucket of picked files, and everything indexed from
+     * it.
+     *
+     * The files are not touched. They belong to somebody's Drive or their
+     * Downloads folder, and the app being told to stop listing them is not the
+     * same instruction as delete them - which is also why the confirmation says
+     * so rather than leaving the user to guess.
+     *
+     * The URI permission is handed back at the same time. Without that, Android
+     * goes on counting this app among those holding a persistable grant on the
+     * folder, which shows up in the system's own storage-access screens as an app
+     * that still has access to a folder the user has just removed from it. There
+     * is also a per-app cap on how many grants can be held at once, and a library
+     * that has been rearranged a few times can reach it.
+     */
     fun removeSource(sourceId: String) {
-        scope.launch { repository.removeSource(sourceId) }
+        scope.launch {
+            val snapshot = index.value
+            val source = snapshot.sources.firstOrNull { it.id == sourceId } ?: return@launch
+
+            // A tree was granted once, as a tree; the documents inside it were
+            // never granted separately and there is nothing of theirs to give
+            // back. Individually picked files are the other way round: the grant
+            // is on each file, and the source they are grouped under is a label
+            // this app invented.
+            val granted = when (source.kind) {
+                SourceKind.EXTERNAL_TREE -> listOf(Uri.parse(source.uri))
+                SourceKind.EXTERNAL_FILE -> snapshot.songsFrom(sourceId).map { Uri.parse(it.uri) }
+                SourceKind.MANAGED -> {
+                    DocumentSources.deleteManagedCopies(context, snapshot.songsFrom(sourceId))
+                    emptyList()
+                }
+            }
+
+            repository.removeSource(sourceId)
+            DocumentSources.releasePermissions(context, granted)
+        }
+    }
+
+    fun dismissError() {
+        lastError = null
+    }
+
+    /** "12 charts - Google Drive", for a row in the folder list. */
+    fun sourceSummary(index: LibraryIndex, source: SourceRef): String {
+        val count = index.songsFrom(source.id).size
+        val charts = if (count == 1) "1 chart" else "$count charts"
+        return when (source.kind) {
+            SourceKind.EXTERNAL_TREE ->
+                "$charts - ${DocumentSources.providerLabel(source.authority)}"
+            else -> charts
+        }
     }
 
     private suspend fun scan(source: SourceRef) {
@@ -126,7 +204,7 @@ class LibraryController(
         scanStatus = ""
         if (found.isEmpty()) {
             lastError = "Nothing readable in ${source.label}. DroidMusic opens PDFs, images, " +
-                "and chord charts in .txt, .cho, .pro, .crd and .tab files."
+                "Word documents, and chord charts in .txt, .cho, .pro, .crd and .tab files."
         }
     }
 
