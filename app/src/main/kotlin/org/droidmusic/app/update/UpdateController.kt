@@ -46,6 +46,17 @@ class UpdateController(
         private set
 
     /**
+     * Why the downloaded APK will not install, worked out before offering it.
+     *
+     * Android's own message for the common case is "App not installed as package
+     * conflicts with an existing package", which names neither the package nor
+     * the conflict. Finding this out here means the app can say what actually
+     * happened and what the way out is.
+     */
+    var conflict by mutableStateOf<Updater.InstallConflict?>(null)
+        private set
+
+    /**
      * The release this build came from, or null for one that CI did not build.
      *
      * Empty rather than absent in BuildConfig because a string field cannot be
@@ -108,6 +119,7 @@ class UpdateController(
                 is Updater.DownloadResult.Ready -> {
                     downloaded = result.file
                     verified = result.verified
+                    conflict = Updater.conflictWith(context, result.file)
                     phase = UpdatePhase.READY
                 }
             }
@@ -136,10 +148,16 @@ class UpdateController(
         runCatching { context.startActivity(Updater.unknownSourcesIntent(context)) }
     }
 
+    /** The app's own settings page, where it can be uninstalled. */
+    fun openAppInfo() {
+        runCatching { context.startActivity(Updater.appInfoIntent(context)) }
+    }
+
     fun discard() {
         Updater.clearDownloads(context)
         downloaded = null
         verified = false
+        conflict = null
         phase = UpdatePhase.IDLE
     }
 

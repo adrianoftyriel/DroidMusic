@@ -258,9 +258,17 @@ private fun UpdateCard(
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
+
+                controller.conflict?.let { conflict ->
+                    Box(Modifier.height(8.dp))
+                    ConflictExplanation(conflict, controller)
+                }
+
                 Box(Modifier.height(8.dp))
                 if (controller.canInstall()) {
-                    Button(onClick = { controller.install() }) { Text("Install") }
+                    Button(onClick = { controller.install() }) {
+                        Text(if (controller.conflict == null) "Install" else "Try installing anyway")
+                    }
                 } else {
                     Text(
                         "Android needs your permission for DroidMusic to install an app. " +
@@ -280,6 +288,72 @@ private fun UpdateCard(
                 enabled = controller.canUpdateThisBuild,
             ) {
                 Text("Download ${megabytes(update.apk.size)}")
+            }
+        }
+    }
+}
+
+/**
+ * What Android is about to refuse, and why, said before it refuses it.
+ *
+ * The installer's own words for the signature case are "App not installed as
+ * package conflicts with an existing package", which names neither the package
+ * nor the conflict, and reads to everybody as "the app is broken".
+ */
+@Composable
+private fun ConflictExplanation(
+    conflict: Updater.InstallConflict,
+    controller: UpdateController,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(12.dp),
+    ) {
+        when (conflict) {
+            Updater.InstallConflict.DIFFERENT_SIGNER -> {
+                Text(
+                    "This will not install over the copy you have.",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                Box(Modifier.height(6.dp))
+                Text(
+                    "It was signed with a different key than the build already on this " +
+                        "device, and Android will not let one replace the other - that rule " +
+                        "is what stops somebody else's APK from posing as an update to this " +
+                        "one. The installer reports it as \"conflicts with an existing " +
+                        "package\".\n\n" +
+                        "The only way through is to uninstall DroidMusic first and install " +
+                        "this as a fresh app. That erases this app's own data: your set " +
+                        "lists, and the list of folders you have added. The charts " +
+                        "themselves are untouched - they live in your folders - but the " +
+                        "folders have to be added again.\n\n" +
+                        "Export any set list you care about before you do it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                Box(Modifier.height(8.dp))
+                Button(onClick = { controller.openAppInfo() }) { Text("Open app info") }
+            }
+
+            Updater.InstallConflict.DIFFERENT_PACKAGE -> {
+                Text(
+                    "This would install as a second app.",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                Box(Modifier.height(6.dp))
+                Text(
+                    "It carries a different application id than the copy running now, so " +
+                        "Android would put it alongside this one rather than update it, and " +
+                        "you would have two DroidMusics and one empty library.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
             }
         }
     }
