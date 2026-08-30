@@ -24,17 +24,22 @@ class PageDetectionTest {
     private val desk = 0xFF202020.toInt()
     private val dim = 0xFF808080.toInt()
 
-    private val size = 200
+    /**
+     * Named [edge] rather than `size` on purpose: inside an `IntArray` extension
+     * below, `size` would resolve to the array's own length rather than to this,
+     * and every write would land far outside the page.
+     */
+    private val edge = 200
 
-    private fun frame(fill: Int) = IntArray(size * size) { fill }
+    private fun frame(fill: Int) = IntArray(edge * edge) { fill }
 
     private fun IntArray.rect(x0: Int, y0: Int, x1: Int, y1: Int, colour: Int) {
-        for (y in y0..y1) for (x in x0..x1) this[y * size + x] = colour
+        for (y in y0..y1) for (x in x0..x1) this[y * edge + x] = colour
     }
 
     /** Scanline fill, for the one case that is not axis aligned. */
     private fun IntArray.quad(points: List<Pair<Int, Int>>, colour: Int) {
-        for (y in 0 until size) {
+        for (y in 0 until edge) {
             val crossings = mutableListOf<Double>()
             for (i in points.indices) {
                 val (x1, y1) = points[i]
@@ -46,7 +51,7 @@ class PageDetectionTest {
             if (crossings.size < 2) continue
             val from = Math.round(crossings.min()).toInt()
             val to = Math.round(crossings.max()).toInt()
-            for (x in from..to) if (x in 0 until size) this[y * size + x] = colour
+            for (x in from..to) if (x in 0 until edge) this[y * edge + x] = colour
         }
     }
 
@@ -76,7 +81,7 @@ class PageDetectionTest {
         pixels.rect(40, 30, 159, 168, paper)
 
         assertCorners(
-            PageDetector.detect(pixels, size, size),
+            PageDetector.detect(pixels, edge, edge),
             topLeft = 40 to 30,
             topRight = 159 to 30,
             bottomRight = 159 to 168,
@@ -93,7 +98,7 @@ class PageDetectionTest {
         pixels.quad(listOf(50 to 25, 170 to 45, 150 to 175, 30 to 150), paper)
 
         assertCorners(
-            PageDetector.detect(pixels, size, size),
+            PageDetector.detect(pixels, edge, edge),
             topLeft = 50 to 25,
             topRight = 170 to 45,
             bottomRight = 150 to 174,
@@ -109,7 +114,7 @@ class PageDetectionTest {
         pixels.rect(0, 0, 15, 15, paper)
 
         assertCorners(
-            PageDetector.detect(pixels, size, size),
+            PageDetector.detect(pixels, edge, edge),
             topLeft = 40 to 30,
             topRight = 159 to 30,
             bottomRight = 159 to 168,
@@ -125,7 +130,7 @@ class PageDetectionTest {
         pixels.rect(40, 30, 159, 168, desk)
 
         assertCorners(
-            PageDetector.detect(pixels, size, size),
+            PageDetector.detect(pixels, edge, edge),
             topLeft = 40 to 30,
             topRight = 159 to 30,
             bottomRight = 159 to 168,
@@ -141,7 +146,7 @@ class PageDetectionTest {
         pixels.rect(40, 30, 159, 168, dim)
 
         assertCorners(
-            PageDetector.detect(pixels, size, size),
+            PageDetector.detect(pixels, edge, edge),
             topLeft = 40 to 30,
             topRight = 159 to 30,
             bottomRight = 159 to 168,
@@ -156,7 +161,7 @@ class PageDetectionTest {
         pixels.rect(110, 60, 140, 120, paper)
 
         assertCorners(
-            PageDetector.detect(pixels, size, size),
+            PageDetector.detect(pixels, edge, edge),
             topLeft = 20 to 40,
             topRight = 90 to 40,
             bottomRight = 90 to 159,
@@ -168,13 +173,13 @@ class PageDetectionTest {
     fun `a page too small to be one is refused`() {
         val pixels = frame(desk)
         pixels.rect(90, 90, 115, 115, paper)
-        assertNull(PageDetector.detect(pixels, size, size))
+        assertNull(PageDetector.detect(pixels, edge, edge))
     }
 
     @Test
     fun `a photograph of nothing is refused`() {
-        assertNull(PageDetector.detect(frame(desk), size, size))
-        assertNull(PageDetector.detect(frame(paper), size, size))
+        assertNull(PageDetector.detect(frame(desk), edge, edge))
+        assertNull(PageDetector.detect(frame(paper), edge, edge))
     }
 
     @Test
@@ -185,7 +190,7 @@ class PageDetectionTest {
         val pixels = frame(desk)
         pixels.rect(20, 20, 185, 49, paper)
         pixels.rect(20, 20, 49, 184, paper)
-        assertNull(PageDetector.detect(pixels, size, size))
+        assertNull(PageDetector.detect(pixels, edge, edge))
     }
 
     @Test
