@@ -77,6 +77,13 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="image/*" />
                 <data android:mimeType="application/json" />
+                <!--
+                  A Word chart tapped in a file manager. Spelled out rather than
+                  covered by a wildcard, because "application/*" would claim
+                  every installer, archive and unknown blob on the device and
+                  then fail to open most of them.
+                -->
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
             </intent-filter>
 
             <!--

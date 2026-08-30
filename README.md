@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list
-and band-sync layers are covered by 105 tests that run on a plain JVM; the app
+and band-sync layers are covered by 122 tests that run on a plain JVM; the app
 layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -29,8 +29,10 @@ worth reading before relying on this at a gig.
 ### Files, from anywhere the phone can see
 
 Point it at a folder. Any folder the Android file picker can reach works, and
-that includes **Google Drive, OneDrive, Dropbox, Box, Proton Drive, Nextcloud**
-and anything else with a document provider installed.
+that includes **Google Drive, Dropbox, Box, Proton Drive, Nextcloud** and
+anything else with a document provider installed. OneDrive is reached a file at
+a time rather than a folder at a time, for a reason that is not this app's doing
+and is set out below.
 
 There is no separate sign-in for any of them, and no vendor SDK in the app.
 Every one of those services publishes a `DocumentsProvider`, so all of them
@@ -45,8 +47,32 @@ expose files already marked available offline. For anything that has to open on
 a stage with no signal, the app will copy a chart into its own storage, where it
 is simply a local file.
 
-Opens `.pdf`, images (`.png .jpg .webp .heic` and friends), and chord charts in
-`.cho .chopro .pro .crd .txt .tab .md`.
+**One of those costs has a name: OneDrive does not offer its folders.** Android's
+folder picker only lists providers that can answer "is this document inside that
+tree", and OneDrive does not claim to — so it is filtered out by the system
+before this app is involved, while appearing perfectly normally when you pick
+*files*. There is no flag that changes this and nothing to retry. So picking
+files individually is offered next to "add a folder" rather than buried, charts
+added that way are grouped as **OneDrive files** so they can be filtered and
+removed as a unit, and the folder list says why OneDrive is missing at the moment
+you are looking for it. The catch is the real one: no folder means new charts are
+not picked up on their own, so each is added by hand.
+
+**Folders can be removed**, from the same list they are added in. The
+confirmation leads with the part that matters — the files are not deleted, only
+forgotten — and the access Android granted is handed back at the same time, so
+the app stops appearing in the system's storage settings as having access to a
+folder you have taken away from it.
+
+Opens `.pdf`, images (`.png .jpg .webp .heic` and friends), Word documents
+(`.docx`), and chord charts in `.cho .chopro .pro .crd .txt .tab .md`.
+
+A chord chart typed in Word is unzipped, read as text, and then transposed, key-
+detected and paginated exactly like any other text chart — same parser, no second
+code path, and no document library in the APK. Charts set in a monospaced font
+come out as they went in; one aligned by eye in a proportional font never lined
+up in *characters* and wants to be a PDF. [docs/FORMATS.md](docs/FORMATS.md) sets
+out exactly what survives the trip.
 
 ### Turning pages
 
@@ -213,7 +239,7 @@ APK nobody can install is not safer, just less useful.
 Being specific about this, because "it builds" and "it works on stage" are
 different claims.
 
-**Tested, by 105 automated tests on the JVM.** Two of these found real bugs
+**Tested, by 122 automated tests on the JVM.** Two of these found real bugs
 during development — the pagination budget check caught a page-break rule that
 could overflow a short viewport, and the chord-word test caught a parser that
 would have rewritten the word "Add" as a chord.
@@ -223,6 +249,7 @@ would have rewritten the word "Add" as a chord.
 | Note spelling | Transposition spells by interval; round trips; no unwritable keys ever chosen |
 | Chord parsing | 20 real-world quality forms; 32 English words that must *not* parse as chords |
 | Chart parsing | ChordPro and chords-over-lyrics; format sniffing; column alignment |
+| Word documents | Paragraphs, breaks, tables, tab stops against typed tabs, tracked-change deletions, non-breaking spaces, a whole file out of the zip |
 | Transposition | Whole-chart spelling consistency; slash basses; capo semantics; round trips at all 11 intervals |
 | Key detection | Major, minor, flat keys; survives transposition to all 12 keys; confidence ordering |
 | Analysis | Non-diatonic chords; capo suggestions; tab detection |
@@ -240,7 +267,10 @@ covered by no test:
 
 - Whether specific pedals send what the defaults expect.
 - Whether a given cloud provider lists a large folder quickly enough to be
-  usable, and how each behaves offline.
+  usable, and how each behaves offline, and which of them turn out to withhold
+  their folders the way OneDrive does.
+- How real Word charts, written by real bands, come out — the reader is tested
+  against markup, not against a hundred documents somebody actually gigs with.
 - mDNS discovery on real venue wifi, which is the environment most likely to
   block it.
 - PDF rendering performance on large scanned songbooks.

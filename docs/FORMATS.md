@@ -12,9 +12,14 @@ What DroidMusic reads, and what it writes.
 | `.png .jpg .jpeg .webp .gif .bmp .heic .heif` | One image, one page | No |
 | `.cho .chopro .chord .chordpro .pro .crd` | ChordPro | **Yes** |
 | `.txt .text .tab .md` | Sniffed — ChordPro, chords-over-lyrics, or plain text | **Yes**, where chords are found |
+| `.docx` | Word document — unzipped to text, then sniffed the same way | **Yes**, where chords are found |
 
 A PDF is a picture of a page. There is nothing in it the app could rewrite, so
 the transposition control is simply absent rather than present and broken.
+
+`.doc` — the old binary Word format — is **not** read. It is not a zip and not
+XML, and offering it only to fail on the stand is worse than not offering it.
+Word will save one as `.docx` in a couple of taps.
 
 ### Format sniffing
 
@@ -52,6 +57,43 @@ Bracket contents that do not parse as a chord are **kept as literal text** rathe
 than dropped — charts use brackets for annotations like `[x2]` and `[slowly]`,
 and silently deleting somebody's performance note would be worse than showing
 it.
+
+---
+
+## Word documents
+
+A `.docx` is a zip with an XML file in it. DroidMusic unzips it, takes the
+characters, and hands them to exactly the same parser everything else goes
+through — so a chord chart typed in Word is sniffed, transposed, key-detected
+and paginated like any other text chart. There is no second code path and no
+document library in the APK.
+
+What is taken:
+
+| In the document | Comes out as |
+|---|---|
+| A paragraph | A line |
+| A line break inside a paragraph | A line |
+| A table row | One line, cells separated |
+| Tabs | Spaces, to the next 4-column stop |
+| Non-breaking spaces | Ordinary spaces |
+| Text deleted by a tracked change | Nothing — it stays deleted |
+| Field codes, bold, italic, fonts, colours | Nothing |
+
+Two limits worth knowing before pointing the app at a folder of them:
+
+- **A chart aligned by eye in a proportional font will not line up.** It never
+  lined up in characters — only in millimetres — and columns are what a
+  chords-over-lyrics chart means by "this chord goes over that syllable". Charts
+  typed in Courier or another monospaced font come out exactly as they went in.
+  Anything laid out visually wants to be a PDF.
+- **A tab becomes spaces on a fixed grid.** In Word a tab means "as far as the
+  next stop, wherever the ruler puts it", and there is no ruler once the
+  formatting is gone. Four columns keeps a chord roughly where the writer put it
+  without flinging it across the line, which eight-column stops would.
+
+If a Word chart reads badly, the reliable fix is to set it in a monospaced font
+before saving, or to export it as a PDF and let it be a picture of a page.
 
 ---
 

@@ -1,9 +1,8 @@
 package org.droidmusic.app.ui.library
 
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -16,12 +15,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -43,7 +47,10 @@ import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.HeaderAction
 import org.droidmusic.app.ui.common.Pill
 import org.droidmusic.app.ui.common.SectionLabel
+import org.droidmusic.library.LibraryIndex
 import org.droidmusic.library.SongRef
+import org.droidmusic.library.SourceKind
+import org.droidmusic.library.SourceRef
 
 /**
  * The library: every chart the app can reach, from every folder it has been
@@ -52,6 +59,11 @@ import org.droidmusic.library.SongRef
  * Sources are listed but not made into a hierarchy to browse. A player looking
  * for a chart wants the chart, not to remember which of five folders it is in,
  * so the default view is one flat searchable list and the folders are a filter.
+ *
+ * Adding and removing those folders both live behind one header action rather
+ * than being split between an add button here and a remove somewhere in
+ * settings. "Where my charts come from" is a single question, and the answer is
+ * a single list you can add a row to or take one away from.
  */
 @Composable
 fun LibraryScreen(
@@ -64,6 +76,7 @@ fun LibraryScreen(
     val index by controller.index.collectAsState()
     var query by remember { mutableStateOf("") }
     var sourceFilter by remember { mutableStateOf<String?>(null) }
+    var showSources by remember { mutableStateOf(false) }
 
     val addFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -88,8 +101,22 @@ fun LibraryScreen(
         if (uris.isNotEmpty()) controller.addFiles(uris)
     }
 
-    val songs = remember(index, query, sourceFilter) {
-        controller.filter(index.songs, query, sourceFilter)
+    // A folder that has just been removed must not go on filtering the list, or
+    // the library looks empty and there is no pill left to tap to get it back.
+    val activeFilter = sourceFilter?.takeIf { id -> index.sources.any { it.id == id } }
+
+    val songs = remember(index, query, activeFilter) {
+        controller.filter(index.songs, query, activeFilter)
+    }
+
+    if (showSources) {
+        SourcesDialog(
+            index = index,
+            controller = controller,
+            onAddFolder = { addFolder.launch(DocumentSources.pickTreeIntent()) },
+            onAddFiles = { addFiles.launch(DocumentSources.pickFilesIntent()) },
+            onDismiss = { showSources = false },
+        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -98,9 +125,7 @@ fun LibraryScreen(
             subtitle = "${index.songs.size} charts in ${index.sources.size} places",
             actions = {
                 HeaderAction(Icons.Filled.Refresh, "Rescan") { controller.rescanAll() }
-                HeaderAction(Icons.Filled.Add, "Add a folder") {
-                    addFolder.launch(DocumentSources.pickTreeIntent())
-                }
+                HeaderAction(Icons.Filled.Folder, "Folders and files") { showSources = true }
                 HeaderAction(Icons.Filled.Settings, "Settings", onOpenSettings)
             },
         )
@@ -113,6 +138,12 @@ fun LibraryScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+        }
+
+        // Errors were being set and never shown, which is the worst of both: the
+        // app knows exactly why the folder did not work and says nothing.
+        controller.lastError?.let { message ->
+            ErrorBanner(message) { controller.dismissError() }
         }
 
         Row(
@@ -141,13 +172,13 @@ fun LibraryScreen(
             ) {
                 org.droidmusic.app.ui.common.ChoicePill(
                     text = "All",
-                    selected = sourceFilter == null,
+                    selected = activeFilter == null,
                     onClick = { sourceFilter = null },
                 )
                 for (source in index.sources) {
                     org.droidmusic.app.ui.common.ChoicePill(
                         text = source.label,
-                        selected = sourceFilter == source.id,
+                        selected = activeFilter == source.id,
                         onClick = { sourceFilter = source.id },
                     )
                 }
@@ -160,8 +191,10 @@ fun LibraryScreen(
             EmptyState(
                 title = "No charts yet",
                 body = "Point DroidMusic at a folder. Anything the system file picker can " +
-                    "reach works - a folder on this device, or one in Google Drive, OneDrive, " +
-                    "Dropbox, Box, Proton Drive or anything else that shows up there.",
+                    "reach works - a folder on this device, or one in Google Drive, Dropbox, " +
+                    "Box, Proton Drive or anything else that shows up there.\n\n" +
+                    "Some services, OneDrive among them, offer their files to the picker but " +
+                    "not their folders. Pick the charts individually for those.",
                 action = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Button(onClick = { addFolder.launch(DocumentSources.pickTreeIntent()) }) {
@@ -177,7 +210,7 @@ fun LibraryScreen(
             EmptyState(
                 title = if (query.isBlank()) "Nothing here" else "No match",
                 body = if (query.isBlank()) {
-                    "That folder has no PDFs, images or chord charts in it."
+                    "That folder has no PDFs, images, Word documents or chord charts in it."
                 } else {
                     "Nothing matches \"$query\"."
                 },
@@ -191,6 +224,168 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Everywhere the library gets its charts from, with a way to add one and a way
+ * to stop using one.
+ *
+ * The note about providers that offer no folders is here rather than in a help
+ * page because this is the screen somebody is on at the exact moment they are
+ * wondering where OneDrive went.
+ */
+@Composable
+private fun SourcesDialog(
+    index: LibraryIndex,
+    controller: LibraryController,
+    onAddFolder: () -> Unit,
+    onAddFiles: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var pendingRemoval by remember { mutableStateOf<SourceRef?>(null) }
+
+    pendingRemoval?.let { source ->
+        ConfirmRemoveDialog(
+            source = source,
+            chartCount = index.songsFrom(source.id).size,
+            onConfirm = {
+                controller.removeSource(source.id)
+                pendingRemoval = null
+            },
+            onDismiss = { pendingRemoval = null },
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Where charts come from") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (index.sources.isEmpty()) {
+                    Text(
+                        "Nothing added yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                for (source in index.sources) {
+                    SourceRow(
+                        label = source.label,
+                        summary = controller.sourceSummary(index, source),
+                        onRemove = { pendingRemoval = source },
+                    )
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+                Text(
+                    "Not every service offers its folders to Android's folder picker - " +
+                        "OneDrive is the one people run into. It is still there under " +
+                        "\"Add files\", and charts added that way work exactly the same.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(onClick = onAddFolder) { Text("Add a folder") }
+                    TextButton(onClick = onAddFiles) { Text("Add files") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+@Composable
+private fun SourceRow(label: String, summary: String, onRemove: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(
+                summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        IconButton(onClick = onRemove) {
+            Icon(
+                Icons.Filled.Delete,
+                contentDescription = "Remove $label",
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/**
+ * The confirmation, which exists to say the one thing the user actually needs to
+ * know: their files are not being deleted.
+ *
+ * "Remove" next to a folder full of somebody's sheet music is frightening
+ * without that sentence, and a library nobody dares tidy is the reason this was
+ * missing in the first place.
+ */
+@Composable
+private fun ConfirmRemoveDialog(
+    source: SourceRef,
+    chartCount: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val charts = if (chartCount == 1) "1 chart" else "$chartCount charts"
+    val whereTheyLive = when (source.kind) {
+        SourceKind.EXTERNAL_TREE ->
+            "The folder and its files are not touched - they stay in " +
+                "${DocumentSources.providerLabel(source.authority)}."
+        SourceKind.EXTERNAL_FILE ->
+            "The files themselves are not touched - they stay where you picked them from."
+        SourceKind.MANAGED ->
+            "The copies DroidMusic made on this device are deleted; the originals are not."
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Remove ${source.label}?") },
+        text = {
+            Text(
+                "DroidMusic will stop listing its $charts. $whereTheyLive\n\n" +
+                    "Any set list entry pointing at one of them will show as missing until " +
+                    "you add it back.",
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Remove") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(start = 16.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onDismiss) { Text("Dismiss") }
     }
 }
 

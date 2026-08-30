@@ -49,7 +49,20 @@ data class SourceRef(
 )
 
 @Serializable
-enum class FileKind { PDF, IMAGE, CHORDPRO, TEXT, UNKNOWN }
+enum class FileKind {
+    PDF,
+    IMAGE,
+    CHORDPRO,
+    TEXT,
+
+    /**
+     * A Word document. Read as text and treated as a chart from there on - see
+     * [DocxText] for what is and is not recovered from one.
+     */
+    DOCX,
+
+    UNKNOWN,
+}
 
 /**
  * One chart in the library.
@@ -86,7 +99,16 @@ data class SongRef(
     /** Title if the file said what it was, filename otherwise. */
     val bestTitle: String get() = title?.takeIf { it.isNotBlank() } ?: displayName.substringBeforeLast('.')
 
-    val isTransposable: Boolean get() = kind == FileKind.CHORDPRO || kind == FileKind.TEXT
+    /**
+     * Whether the chart is text the app can rewrite.
+     *
+     * A Word document counts: what comes out of it is characters, and once it is
+     * characters it goes through the same parser, the same key detection and the
+     * same transposer as a `.txt`. A PDF does not, because there is nothing in it
+     * to rewrite.
+     */
+    val isTransposable: Boolean get() =
+        kind == FileKind.CHORDPRO || kind == FileKind.TEXT || kind == FileKind.DOCX
 
     companion object {
         fun kindOf(displayName: String, mimeType: String? = null): FileKind {
@@ -95,6 +117,7 @@ data class SongRef(
                 ext == "pdf" || mimeType == "application/pdf" -> FileKind.PDF
                 ext in IMAGE_EXTENSIONS || mimeType?.startsWith("image/") == true -> FileKind.IMAGE
                 ext in CHORDPRO_EXTENSIONS -> FileKind.CHORDPRO
+                ext in DOCUMENT_EXTENSIONS || mimeType == DOCX_MIME_TYPE -> FileKind.DOCX
                 ext in TEXT_EXTENSIONS || mimeType?.startsWith("text/") == true -> FileKind.TEXT
                 else -> FileKind.UNKNOWN
             }
@@ -104,8 +127,19 @@ data class SongRef(
         val CHORDPRO_EXTENSIONS = setOf("cho", "chopro", "chord", "chordpro", "crd", "pro")
         val TEXT_EXTENSIONS = setOf("txt", "text", "tab", "md")
 
+        /**
+         * Word documents. `.doc` is deliberately absent: the old binary format
+         * is not a zip and not XML, and claiming to open one only to fail on the
+         * stand is worse than not offering it.
+         */
+        val DOCUMENT_EXTENSIONS = setOf("docx")
+
+        const val DOCX_MIME_TYPE =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
         /** Everything the viewer can open, for filtering a document picker. */
-        val ALL_EXTENSIONS = IMAGE_EXTENSIONS + CHORDPRO_EXTENSIONS + TEXT_EXTENSIONS + "pdf"
+        val ALL_EXTENSIONS =
+            IMAGE_EXTENSIONS + CHORDPRO_EXTENSIONS + TEXT_EXTENSIONS + DOCUMENT_EXTENSIONS + "pdf"
     }
 }
 

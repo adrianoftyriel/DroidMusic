@@ -169,6 +169,7 @@ This is a genuine trade and not a free win:
 - Some providers only expose files that have been marked available offline.
 - There is no way to trigger a sync, or to know whether a file will need the
   network until you try to open it.
+- **Some providers do not offer their folders at all** — see below.
 
 The mitigation is explicit rather than hidden: the app will copy a chart into
 its own storage, where it is simply a local file that will open on a stage with
@@ -180,9 +181,111 @@ Persisting the URI permission (`takePersistableUriPermission`) is not optional.
 Without it the app can read the folder until the process dies and then quietly
 cannot, which presents to the user as "my library is empty" the next morning.
 
+The grant is also handed **back** when a folder is removed from the library. A
+persistable grant this app no longer uses still shows up in Android's own
+storage-access screens as this app having access to that folder, which is untrue
+and unnerving to find; and the platform caps how many an app may hold, so a
+library rearranged a few times over a couple of years can quietly stop being able
+to take a new one.
+
+### The folder that is not in the folder picker
+
+Point the app at a folder and OneDrive is not among the choices. Open the same
+app's *file* picker and there it is. This reads exactly like a bug in this app,
+and it is worth writing down that it is not one.
+
+Android's folder picker (`ACTION_OPEN_DOCUMENT_TREE`) only lists roots whose
+provider declares `Root.FLAG_SUPPORTS_IS_CHILD` — "I can tell you whether this
+document is inside that tree", which is what makes granting a whole subtree
+meaningful. A provider that does not declare it is filtered out by the system
+picker before this app is involved. There is no flag to pass, nothing to retry,
+and no fallback API: the same grant simply is not on offer.
+
+So the app stops treating a folder as the only way in:
+
+- **Picking files individually reaches every provider**, because
+  `ACTION_OPEN_DOCUMENT` has no such requirement. That path is now offered
+  alongside "add a folder" rather than only when the library is empty, which is
+  where it used to be — reachable exactly once, before the thing that makes
+  somebody need it has happened.
+- **Picked files are grouped by the provider they came from**, so "OneDrive
+  files" is a real place in the library that can be filtered by and removed in
+  one go, rather than an anonymous pile called "Picked files".
+- **The reason is said out loud**, in the folder list, at the moment somebody is
+  looking for OneDrive and not finding it. A limit nobody can explain is
+  indistinguishable from a broken app.
+
+What this costs is that OneDrive charts do not appear when new ones are added to
+the folder, because there is no folder — each is added once, by hand. That is
+worse than a tree and much better than nothing, and it is the provider's decision
+rather than this app's.
+
+### Removing a folder
+
+Adding a folder without being able to remove one is not half a feature, it is a
+trap: a library grows, someone reorganises their Drive, and the app goes on
+listing four hundred charts it can no longer open with no way to say so.
+
+The confirmation leads with the thing the user needs to know — **the files are
+not deleted**. "Remove" next to a folder full of somebody's sheet music is
+frightening without that sentence, and a library nobody dares tidy is how it
+ended up needing tidying.
+
+Files the app copied into its *own* storage are the one exception: those are
+deleted, because nothing outside the app has a reference to them and forgetting
+them without deleting them would strand a scanned songbook's worth of space on
+the device with nothing left that could ever open it.
+
 ---
 
-## 5. Band-leader mode
+## 5. Reading a chart out of a Word document
+
+Plenty of bands keep their chord charts in Word, so `.docx` is read. The
+interesting decisions are what *not* to do.
+
+**No document library.** Apache POI reads `.docx` and would also bring several
+megabytes of spreadsheet, presentation and OLE2 code into an APK whose job is to
+open one chart on a phone at a gig. A `.docx` is a zip with an XML file in it,
+and the only thing this app wants from it is the characters in the order they
+were typed. That reader is a couple of hundred lines with no dependencies, and it
+lives in `:core:library`, which means it is tested on a plain JVM rather than on
+a device.
+
+**No second code path.** The reader returns a string. From there the chart goes
+through the same sniffing, the same chord parser, the same key detection, the
+same transposer and the same layout engine as a `.txt`. Word support is a
+decoder, not a parallel implementation, which is why it is a small change and why
+it cannot rot separately from everything else.
+
+**A scanner, not an XML parser.** The only questions being asked of the markup
+are "is this a run of text" and "does this end a line". Both are answerable by
+walking the tags, without a parser on the device and without depending on the
+file declaring its namespaces the way the specification says it should.
+
+Three details that would each be a silent bug:
+
+- `<w:tab/>` means two different things depending on where it sits: a tab
+  character inside a run, and *the definition of a tab stop* inside `w:pPr`.
+  Reading the second as the first indents every paragraph in a document that has
+  a ruler set, which is most of them. Every property element in WordprocessingML
+  ends in `Pr`, so all of them are skipped whole.
+- `<w:delText>` holds text a tracked change **deleted**. Putting it back would
+  show the player a line somebody deliberately took out of the chart.
+- Word writes non-breaking spaces wherever it decides a gap should not be broken,
+  and `Character.isWhitespace` says they are not whitespace. A chord line padded
+  with them is one enormous token, fails the "every token on the line is a chord"
+  test, and the chart quietly stops being transposable. They are turned back into
+  ordinary spaces.
+
+The honest limit is alignment. A chart typed in a proportional font and lined up
+by eye never lined up in *characters*, and columns are exactly what a
+chords-over-lyrics chart means. Monospaced Word charts come out perfectly;
+visually-aligned ones want to be PDFs, and [FORMATS.md](FORMATS.md) says so
+rather than leaving it to be discovered on a stand.
+
+---
+
+## 6. Band-leader mode
 
 ### Absolute positions, not instructions
 
@@ -257,7 +360,7 @@ newline framing is only sound if that holds.
 
 ---
 
-## 6. The viewer
+## 7. The viewer
 
 ### Tap zones
 
@@ -315,7 +418,7 @@ syllable and the words open up a little.
 
 ---
 
-## 7. Foot switches
+## 8. Foot switches
 
 The thing that makes this tractable is that both Bluetooth and USB pedals
 present themselves to Android as HID keyboards. By the time the app sees
@@ -348,7 +451,7 @@ it does not also scroll something.
 
 ---
 
-## 8. Storage
+## 9. Storage
 
 Settings, set lists and the file index are JSON files, not a database.
 
@@ -372,7 +475,7 @@ and a random UUID does that perfectly.
 
 ---
 
-## 9. Things deliberately not built
+## 10. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
