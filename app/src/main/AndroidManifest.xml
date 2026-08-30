@@ -33,9 +33,23 @@
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!--
+      Scanning music with the camera goes through an ACTION_IMAGE_CAPTURE
+      intent, so the picture is taken by the camera app and this one needs no
+      CAMERA permission of its own. The <queries> entry is what lets this app
+      ask whether such an app exists before offering the button; without it,
+      package visibility on Android 11 and later hides the answer.
+    -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
 
     <application
         android:name=".DroidMusicApp"

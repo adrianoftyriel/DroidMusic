@@ -9,4 +9,11 @@
       since Android 7 and a provider is the only way to pass it across.
     -->
     <cache-path name="updates" path="updates/" />
+
+    <!--
+      Where the camera app writes the photograph it takes. It is the camera that
+      needs this, not another part of this app: a file:// URI handed across to
+      another process has thrown FileUriExposedException since Android 7.
+    -->
+    <cache-path name="captures" path="captures/" />
 </paths>
