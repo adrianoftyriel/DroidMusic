@@ -14,5 +14,6 @@ tasks.register("coreTests") {
         ":core:music:test",
         ":core:library:test",
         ":core:session:test",
+        ":core:update:test",
     )
 }

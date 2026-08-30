@@ -13,9 +13,9 @@ result the way an arranger would write it.
 
 ## Status
 
-**v0.1.** Everything described below is implemented. The music theory, set list
-and band-sync layers are covered by 122 tests that run on a plain JVM; the app
-layer adds its own.
+**v0.1.** Everything described below is implemented. The music theory, set list,
+band-sync and update layers are covered by 154 tests that run on a plain JVM; the
+app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
 What has *not* happened is anyone running it on a phone — see
@@ -132,6 +132,42 @@ leading "the". Two people rarely have byte-identical copies of the same chart:
 one has a scan, the other a ChordPro. Anything genuinely missing is named rather
 than silently dropped.
 
+### Updating itself
+
+There is no Play Store listing, so **Settings - Check for updates** fetches the
+newest build straight from this repository's releases and hands it to Android's
+installer. You choose whether to be offered full releases only or the
+pre-releases that every push to `dev` produces.
+
+**Nothing is checked or downloaded until you press the button.** No check on
+launch, no periodic check, no background download. An app that decides to fetch
+nine megabytes over a venue's wifi ninety seconds before the first song has done
+the worst thing a page turner can do, and the only way to be certain it never
+happens is for there to be no code that could start it.
+
+Three things it is careful about, because each is silent when it goes wrong:
+
+- **It compares versions properly.** `v0.1.0-dev.9` and `v0.1.0-dev.10` differ by
+  one character, and as text the first sorts *after* the second — so the naive
+  version of this feature tells a player nine builds behind that they are up to
+  date, and keeps telling them. Versions are parsed and ordered by SemVer's
+  rules, and publishing `v0.1.0` correctly reads as an upgrade to everyone on a
+  dev build.
+- **It never offers a downgrade.** Android would allow one — every pre-release
+  carries the same `versionCode`, so the installer sees a reinstall — which
+  means this check is the only thing that prevents it.
+- **It says what it verified.** Each release publishes a `SHA256SUMS.txt`, and
+  the download is checked against it. That catches a transfer truncated by bad
+  wifi or answered by a captive portal's login page; it is *not* a signature,
+  and the app does not describe it as one. What actually protects the install is
+  Android's own rule that an app cannot be replaced by a package signed with a
+  different key.
+
+That last rule has a consequence worth knowing before relying on any of this: a
+CI build made **without** signing secrets is debug-signed, and cannot update — or
+be updated by — a release-signed one. The install just fails. Details in
+[docs/DESIGN.md](docs/DESIGN.md).
+
 ### Band-leader mode
 
 One device taps **Start**; the rest tap its name. Sessions find each other over
@@ -217,7 +253,8 @@ re-paginate on rotation and keep you on **the line you were reading**, not on
 ```
 
 Requires JDK 17. `-PcoreOnly` leaves the Android module out of the build
-entirely, so the music theory, set list and sync suites run on any machine.
+entirely, so the music theory, set list, sync and update suites run on any
+machine.
 
 ### Releases
 
@@ -239,7 +276,7 @@ APK nobody can install is not safer, just less useful.
 Being specific about this, because "it builds" and "it works on stage" are
 different claims.
 
-**Tested, by 122 automated tests on the JVM.** Two of these found real bugs
+**Tested, by 154 automated tests on the JVM.** Two of these found real bugs
 during development — the pagination budget check caught a page-break rule that
 could overflow a short viewport, and the chord-word test caught a parser that
 would have rewritten the word "Add" as a chord.
@@ -256,6 +293,7 @@ would have rewritten the word "Add" as a chord.
 | Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned |
 | Set lists | Reorder, JSON round trip, malformed input, cross-device matching |
 | Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases |
+| Updates | SemVer ordering including `dev.9` against `dev.10`; a release outranking its own pre-releases; downgrades never offered; drafts and APK-less releases skipped; the debug APK never chosen; a real releases payload; checksum parsing |
 | Tap zones | The exact 1/3–2/3 split; mirroring; the controls band |
 | Foot switches | Auto-repeat; contact bounce; unmapped keys passed back to the system; learn mode |
 | Page layout | Spread parity; end and start detection; zero-page documents |

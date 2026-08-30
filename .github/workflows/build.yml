@@ -85,6 +85,61 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # The tag this commit will be published under, worked out before anything
+      # is compiled so it can be stamped into the APK.
+      #
+      # The in-app updater needs it. Every pre-release built from dev carries the
+      # same versionName - only the tag carries the run number - so a build that
+      # knew nothing but its version name could not tell one pre-release from
+      # another, and would report "up to date" to everybody forever.
+      #
+      # Computed here rather than in the publish job so that the string stamped
+      # into the APK and the string the release is published under are the same
+      # string by construction. Two copies of this logic that drifted apart would
+      # produce an app convinced it was a release that does not exist.
+      - name: Work out the release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version=$(sed -n 's/^droidmusic\.versionName=\(.*\)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')
+          if [ -z "$version" ]; then
+            echo "::error::Could not read droidmusic.versionName from gradle.properties"
+            exit 1
+          fi
+
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            tag="v${version}"
+            title="DroidMusic ${tag}"
+            prerelease=false
+          else
+            # Pre-release tags carry the run number, so every push to dev
+            # produces a distinct, ordered tag without anyone bumping anything.
+            tag="v${version}-dev.${{ github.run_number }}"
+            title="DroidMusic ${tag} (pre-release)"
+            prerelease=true
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "title=$title"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "This build is $tag (prerelease=$prerelease)"
+
+      # Appended rather than passed with -P on each command, so that every Gradle
+      # invocation below picks it up and none can be forgotten. It changes only
+      # the runner's checkout.
+      #
+      # A build from any other branch, and any build on a laptop, leaves this
+      # unset - and the app then says it was built from source rather than
+      # claiming to be a release nobody published.
+      - name: Stamp the release tag into the build
+        if: github.ref_name == 'main' || github.ref_name == 'dev'
+        run: echo "droidmusic.releaseTag=${{ steps.release.outputs.tag }}" >> gradle.properties
+
       # Release builds are signed with a real key when the repository has one,
       # and with the debug key when it does not. Writing the keystore here rather
       # than in the Gradle file keeps the secret handling in one visible place.
@@ -214,6 +269,10 @@ jobs:
 
     outputs:
       signed: ${{ steps.signing.outputs.signed }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      title: ${{ steps.release.outputs.title }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
 
   # ---------------------------------------------------------------------------
   # Publishing. Gated on the build, so a release can only ever contain artifacts
@@ -245,51 +304,39 @@ jobs:
           name: DroidMusic-apk
           path: artifacts
 
-      - name: Work out the version and tag
-        id: meta
+      # The tag is not recomputed here. It was worked out in the build job and
+      # stamped into the APK, and an APK that believes it is one release while
+      # being published as another is exactly the bug an in-app updater turns
+      # into a loop: the app checks, sees a tag it does not match, installs it,
+      # and still does not match.
+      - name: Check the tag is free
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
           set -euo pipefail
 
-          version=$(sed -n 's/^droidmusic\.versionName=\(.*\)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')
-          if [ -z "$version" ]; then
-            echo "::error::Could not read droidmusic.versionName from gradle.properties"
+          if [ -z "$TAG" ]; then
+            echo "::error::The build job did not report a release tag."
             exit 1
           fi
 
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            tag="v${version}"
-            title="DroidMusic ${tag}"
-            prerelease=false
-
-            # Refuse to clobber an existing release. Republishing over a tag
-            # would silently replace an APK somebody may already have installed,
-            # so this is a hard stop with an actionable message.
-            if gh release view "$tag" >/dev/null 2>&1; then
-              echo "::error::Release $tag already exists. Bump droidmusic.versionName in gradle.properties before merging to main."
-              exit 1
-            fi
-          else
-            # Pre-release tags carry the run number, so every push to dev
-            # produces a distinct, ordered tag without anyone bumping anything.
-            tag="v${version}-dev.${{ github.run_number }}"
-            title="DroidMusic ${tag} (pre-release)"
-            prerelease=true
+          # Refuse to clobber an existing release. Republishing over a tag would
+          # silently replace an APK somebody may already have installed - and now
+          # that the app updates itself, may already have been offered.
+          if [ "${{ github.ref_name }}" = "main" ] && gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists. Bump droidmusic.versionName in gradle.properties before merging to main."
+            exit 1
           fi
 
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "title=$title" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "Publishing $tag (prerelease=$prerelease)"
+          echo "Publishing $TAG"
 
       - name: Name the files after the version
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ steps.meta.outputs.version }}"
+          version="${{ needs.build.outputs.version }}"
           mkdir -p dist
 
           shopt -s nullglob
@@ -344,7 +391,7 @@ jobs:
 
             echo "## Install"
             echo
-            echo "Download \`DroidMusic-${{ steps.meta.outputs.version }}.apk\` and open it on the"
+            echo "Download \`DroidMusic-${{ needs.build.outputs.version }}.apk\` and open it on the"
             echo "device. Android will ask you to allow installing from this source the first time."
             echo
 
@@ -362,9 +409,9 @@ jobs:
             echo
             echo "| File | What it is |"
             echo "|---|---|"
-            echo "| \`DroidMusic-${{ steps.meta.outputs.version }}.apk\` | Release build. This is the one to install. |"
-            echo "| \`DroidMusic-${{ steps.meta.outputs.version }}-debug.apk\` | Debug build, installs alongside the release one. |"
-            echo "| \`DroidMusic-${{ steps.meta.outputs.version }}.aab\` | App bundle, for Play Store upload. |"
+            echo "| \`DroidMusic-${{ needs.build.outputs.version }}.apk\` | Release build. This is the one to install. |"
+            echo "| \`DroidMusic-${{ needs.build.outputs.version }}-debug.apk\` | Debug build, installs alongside the release one. |"
+            echo "| \`DroidMusic-${{ needs.build.outputs.version }}.aab\` | App bundle, for Play Store upload. |"
             echo "| \`SHA256SUMS.txt\` | Checksums. |"
             echo
 
@@ -406,14 +453,14 @@ jobs:
         run: |
           set -euo pipefail
           args=(
-            "${{ steps.meta.outputs.tag }}"
+            "${{ needs.build.outputs.tag }}"
             --target "${{ github.sha }}"
-            --title "${{ steps.meta.outputs.title }}"
+            --title "${{ needs.build.outputs.title }}"
             --notes-file release-notes.md
           )
-          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+          if [ "${{ needs.build.outputs.prerelease }}" = "true" ]; then
             args+=(--prerelease)
           fi
           gh release create "${args[@]}" dist/*
 
-          echo "### Published [${{ steps.meta.outputs.tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.meta.outputs.tag }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Published [${{ needs.build.outputs.tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.build.outputs.tag }})" >> "$GITHUB_STEP_SUMMARY"

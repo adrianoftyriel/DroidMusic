@@ -14,6 +14,28 @@ val versionNameValue: String = providers.gradleProperty("droidmusic.versionName"
 val versionCodeValue: Int = providers.gradleProperty("droidmusic.versionCode").get().toInt()
 
 /**
+ * The release tag this APK belongs to, stamped in by CI.
+ *
+ * Deliberately *not* the version name, and that distinction is the whole reason
+ * it exists. Every pre-release built from `dev` carries versionName 0.1.0 -
+ * only the tag carries the run number - so a build that knew nothing but its
+ * version name could never tell one pre-release from another, and the in-app
+ * updater would report "up to date" to everybody forever.
+ *
+ * A local build has no tag, and says so. Inventing `v0.1.0` for it would make
+ * every laptop build claim to be the release of that name.
+ */
+val releaseTagValue: String = providers.gradleProperty("droidmusic.releaseTag")
+    .orNull.orEmpty().trim()
+
+/**
+ * Where the updater looks for releases. A fork that publishes its own builds
+ * sets this and its APKs update from its own repository rather than from here.
+ */
+val updateRepositoryValue: String = providers.gradleProperty("droidmusic.updateRepository")
+    .orNull.orEmpty().trim().ifEmpty { "adrianoftyriel/DroidMusic" }
+
+/**
  * Release signing, if this build has a keystore to sign with.
  *
  * CI writes `keystore.properties` from repository secrets when they are set. A
@@ -46,6 +68,9 @@ android {
         versionName = versionNameValue
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         resourceConfigurations += listOf("en")
+
+        buildConfigField("String", "RELEASE_TAG", "\"$releaseTagValue\"")
+        buildConfigField("String", "UPDATE_REPOSITORY", "\"$updateRepositoryValue\"")
     }
 
     signingConfigs {
@@ -134,6 +159,7 @@ dependencies {
     implementation(project(":core:music"))
     implementation(project(":core:library"))
     implementation(project(":core:session"))
+    implementation(project(":core:update"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

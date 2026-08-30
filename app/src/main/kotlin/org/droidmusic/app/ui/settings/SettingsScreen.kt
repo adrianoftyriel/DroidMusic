@@ -35,8 +35,10 @@ fun SettingsScreen(
     settings: AppSettings,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onOpenFootSwitchSetup: () -> Unit,
+    onOpenUpdates: () -> Unit,
     onBack: () -> Unit,
     versionName: String,
+    releaseTag: String?,
 ) {
     Column(
         Modifier
@@ -241,9 +243,19 @@ fun SettingsScreen(
                 },
             )
 
+            SectionLabel("Updates")
+
+            SettingRow(
+                title = "Check for updates",
+                subtitle = "Fetches the newest build from GitHub and installs it. Nothing is " +
+                    "checked or downloaded until you ask for it.",
+                onClick = onOpenUpdates,
+            )
+
             HorizontalDivider(Modifier.padding(vertical = 16.dp))
             Text(
-                "DroidMusic $versionName",
+                releaseTag?.let { "DroidMusic $versionName - release $it" }
+                    ?: "DroidMusic $versionName - built from source",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),

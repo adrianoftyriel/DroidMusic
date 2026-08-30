@@ -31,6 +31,8 @@ import org.droidmusic.app.ui.setlist.SetlistDetailScreen
 import org.droidmusic.app.ui.setlist.SetlistsScreen
 import org.droidmusic.app.ui.settings.FootSwitchSetupScreen
 import org.droidmusic.app.ui.settings.SettingsScreen
+import org.droidmusic.app.update.UpdateController
+import org.droidmusic.app.update.UpdatesScreen
 import org.droidmusic.app.ui.viewer.ViewerControls
 import org.droidmusic.app.ui.viewer.ViewerController
 import org.droidmusic.app.ui.viewer.ViewerSurface
@@ -68,6 +70,8 @@ fun DroidMusicRoot(
     val libraryController = remember {
         LibraryController(context, app.appScope, app.library, app.settings)
     }
+
+    val updateController = remember { UpdateController(context, app.appScope) }
 
     val setlistController = remember {
         SetlistController(
@@ -259,6 +263,18 @@ fun DroidMusicRoot(
                     settings = settings,
                     onChange = { transform -> app.settings.updateAsync(transform) },
                     onOpenFootSwitchSetup = { navigator.go(Screen.FootSwitchSetup) },
+                    onOpenUpdates = { navigator.go(Screen.Updates) },
+                    onBack = { navigator.back() },
+                    versionName = DroidMusicApp.VERSION,
+                    releaseTag = updateController.currentTag,
+                )
+
+                Screen.Updates -> UpdatesScreen(
+                    controller = updateController,
+                    channel = settings.updateChannel,
+                    onChannelChange = { channel ->
+                        app.settings.updateAsync { it.copy(updateChannel = channel) }
+                    },
                     onBack = { navigator.back() },
                     versionName = DroidMusicApp.VERSION,
                 )
