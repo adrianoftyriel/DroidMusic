@@ -156,20 +156,71 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -n "${KEYSTORE_BASE64:-}" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
-            {
-              echo "storeFile=release.keystore"
-              echo "storePassword=${KEYSTORE_PASSWORD}"
-              echo "keyAlias=${KEY_ALIAS}"
-              echo "keyPassword=${KEY_PASSWORD}"
-            } > keystore.properties
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-            echo "Release builds will be signed with the repository key."
-          else
+
+          # Which of the four arrived, by name.
+          #
+          # This exists because the previous version had exactly one failure
+          # mode and no diagnosis: if the base64 secret was empty for any
+          # reason - a typo in the name, secrets added under Environments or
+          # Dependabot rather than Actions, an organisation secret not granted
+          # to this repository - the build quietly debug-signed itself and said
+          # only "no signing key configured".
+          #
+          # Only names are printed, never values. A secret's name is not a
+          # secret, and GitHub masks the values in this log regardless.
+          present=""
+          missing=""
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            case "$name" in
+              ANDROID_KEYSTORE_BASE64)   value="${KEYSTORE_BASE64:-}" ;;
+              ANDROID_KEYSTORE_PASSWORD) value="${KEYSTORE_PASSWORD:-}" ;;
+              ANDROID_KEY_ALIAS)         value="${KEY_ALIAS:-}" ;;
+              ANDROID_KEY_PASSWORD)      value="${KEY_PASSWORD:-}" ;;
+            esac
+            if [ -n "$value" ]; then
+              present="$present $name"
+            else
+              missing="$missing $name"
+            fi
+          done
+
+          echo "Signing secrets this job can see:${present:- (none)}"
+          echo "Signing secrets missing:${missing:- (none)}"
+
+          if [ -n "$missing" ]; then
             echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No signing key configured; the release APK will be debug-signed."
+            if [ -n "$present" ]; then
+              echo "::error::Signing is half configured. Missing:${missing}. All four must be repository secrets under Settings -> Secrets and variables -> Actions; secrets added under Environments, Dependabot or Codespaces are not visible here."
+            else
+              echo "::warning::No signing secrets are visible to this job, so the release APK will be debug-signed with a key generated for this run. If you have added them, check they are *repository* secrets under Settings -> Secrets and variables -> Actions and that the names match exactly."
+            fi
+            exit 0
           fi
+
+          if ! printf '%s' "$KEYSTORE_BASE64" | base64 -d > release.keystore 2>/dev/null; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is set but is not valid base64. It must be one line with no headers - certutil -encode adds both. Use PowerShell's [Convert]::ToBase64String, or base64 -w0."
+            exit 1
+          fi
+
+          # Prove the keystore, its password and the alias agree, here, rather
+          # than letting the signing task fail three minutes later with a
+          # message about a keystore path.
+          if ! keytool -list -keystore release.keystore \
+                 -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > keytool.log 2>&1; then
+            echo "::error::The keystore decoded, but its alias could not be opened with the password given. Check ANDROID_KEY_ALIAS and ANDROID_KEYSTORE_PASSWORD. keytool said:"
+            sed 's/^/  /' keytool.log
+            exit 1
+          fi
+          grep -i "SHA256:" keytool.log | head -1 || true
+
+          {
+            echo "storeFile=release.keystore"
+            echo "storePassword=${KEYSTORE_PASSWORD}"
+            echo "keyAlias=${KEY_ALIAS}"
+            echo "keyPassword=${KEY_PASSWORD}"
+          } > keystore.properties
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "Release builds will be signed with the repository key."
 
       # Compile first, on its own, so a compile error is reported as a compile
       # error rather than as a lint task that happened to fail.
