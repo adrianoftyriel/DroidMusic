@@ -21,9 +21,35 @@
     -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!--
+      Installing an update the user asked for. Since Android 8 this is granted
+      per app rather than by one global "unknown sources" switch, and it cannot
+      be requested with a runtime dialog - declaring it only makes the app
+      eligible to appear in that Settings page, which the updater links to.
+
+      Nothing is ever downloaded without somebody pressing a button, and the
+      install itself is Android's own, with its own confirmation. See
+      org.droidmusic.app.update.Updater.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
+      Scanning music with the camera goes through an ACTION_IMAGE_CAPTURE
+      intent, so the picture is taken by the camera app and this one needs no
+      CAMERA permission of its own. The <queries> entry is what lets this app
+      ask whether such an app exists before offering the button; without it,
+      package visibility on Android 11 and later hides the answer.
+    -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
 
     <application
         android:name=".DroidMusicApp"
@@ -77,6 +103,13 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="image/*" />
                 <data android:mimeType="application/json" />
+                <!--
+                  A Word chart tapped in a file manager. Spelled out rather than
+                  covered by a wildcard, because "application/*" would claim
+                  every installer, archive and unknown blob on the device and
+                  then fail to open most of them.
+                -->
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
             </intent-filter>
 
             <!--

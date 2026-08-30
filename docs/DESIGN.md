@@ -6,8 +6,8 @@ Why each choice was made, including the ones that were nearly made differently.
 
 ## 1. Why the core is not an Android module
 
-Three of the four modules — `:core:music`, `:core:library`, `:core:session` —
-have no Android dependency at all. That is not architectural tidiness for its
+Four of the five modules — `:core:music`, `:core:library`, `:core:session`,
+`:core:update` — have no Android dependency at all. That is not architectural tidiness for its
 own sake; it comes from what is in them.
 
 The parts of this app where being wrong is **loud** are all in the Android
@@ -24,7 +24,7 @@ Silent failures need tests, and tests need to be cheap enough that they are run
 constantly. Splitting the core out means:
 
 ```sh
-./gradlew -PcoreOnly coreTests      # 105 tests, no Android SDK, seconds
+./gradlew -PcoreOnly coreTests      # 154 tests, no Android SDK, seconds
 ```
 
 which runs on any machine with a JDK, gates the APK build in CI, and gives a
@@ -169,6 +169,7 @@ This is a genuine trade and not a free win:
 - Some providers only expose files that have been marked available offline.
 - There is no way to trigger a sync, or to know whether a file will need the
   network until you try to open it.
+- **Some providers do not offer their folders at all** — see below.
 
 The mitigation is explicit rather than hidden: the app will copy a chart into
 its own storage, where it is simply a local file that will open on a stage with
@@ -180,9 +181,297 @@ Persisting the URI permission (`takePersistableUriPermission`) is not optional.
 Without it the app can read the folder until the process dies and then quietly
 cannot, which presents to the user as "my library is empty" the next morning.
 
+The grant is also handed **back** when a folder is removed from the library. A
+persistable grant this app no longer uses still shows up in Android's own
+storage-access screens as this app having access to that folder, which is untrue
+and unnerving to find; and the platform caps how many an app may hold, so a
+library rearranged a few times over a couple of years can quietly stop being able
+to take a new one.
+
+### The folder that is not in the folder picker
+
+Point the app at a folder and OneDrive is not among the choices. Open the same
+app's *file* picker and there it is. This reads exactly like a bug in this app,
+and it is worth writing down that it is not one.
+
+Android's folder picker (`ACTION_OPEN_DOCUMENT_TREE`) only lists roots whose
+provider declares `Root.FLAG_SUPPORTS_IS_CHILD` — "I can tell you whether this
+document is inside that tree", which is what makes granting a whole subtree
+meaningful. A provider that does not declare it is filtered out by the system
+picker before this app is involved. There is no flag to pass, nothing to retry,
+and no fallback API: the same grant simply is not on offer.
+
+So the app stops treating a folder as the only way in:
+
+- **Picking files individually reaches every provider**, because
+  `ACTION_OPEN_DOCUMENT` has no such requirement. That path is now offered
+  alongside "add a folder" rather than only when the library is empty, which is
+  where it used to be — reachable exactly once, before the thing that makes
+  somebody need it has happened.
+- **Picked files are grouped by the provider they came from**, so "OneDrive
+  files" is a real place in the library that can be filtered by and removed in
+  one go, rather than an anonymous pile called "Picked files".
+- **The reason is said out loud**, in the folder list, at the moment somebody is
+  looking for OneDrive and not finding it. A limit nobody can explain is
+  indistinguishable from a broken app.
+
+What this costs is that OneDrive charts do not appear when new ones are added to
+the folder, because there is no folder — each is added once, by hand. That is
+worse than a tree and much better than nothing, and it is the provider's decision
+rather than this app's.
+
+### Removing a folder
+
+Adding a folder without being able to remove one is not half a feature, it is a
+trap: a library grows, someone reorganises their Drive, and the app goes on
+listing four hundred charts it can no longer open with no way to say so.
+
+The confirmation leads with the thing the user needs to know — **the files are
+not deleted**. "Remove" next to a folder full of somebody's sheet music is
+frightening without that sentence, and a library nobody dares tidy is how it
+ended up needing tidying.
+
+Files the app copied into its *own* storage are the one exception: those are
+deleted, because nothing outside the app has a reference to them and forgetting
+them without deleting them would strand a scanned songbook's worth of space on
+the device with nothing left that could ever open it.
+
 ---
 
-## 5. Band-leader mode
+## 5. Reading a chart out of a Word document
+
+Plenty of bands keep their chord charts in Word, so `.docx` is read. The
+interesting decisions are what *not* to do.
+
+**No document library.** Apache POI reads `.docx` and would also bring several
+megabytes of spreadsheet, presentation and OLE2 code into an APK whose job is to
+open one chart on a phone at a gig. A `.docx` is a zip with an XML file in it,
+and the only thing this app wants from it is the characters in the order they
+were typed. That reader is a couple of hundred lines with no dependencies, and it
+lives in `:core:library`, which means it is tested on a plain JVM rather than on
+a device.
+
+**No second code path.** The reader returns a string. From there the chart goes
+through the same sniffing, the same chord parser, the same key detection, the
+same transposer and the same layout engine as a `.txt`. Word support is a
+decoder, not a parallel implementation, which is why it is a small change and why
+it cannot rot separately from everything else.
+
+**A scanner, not an XML parser.** The only questions being asked of the markup
+are "is this a run of text" and "does this end a line". Both are answerable by
+walking the tags, without a parser on the device and without depending on the
+file declaring its namespaces the way the specification says it should.
+
+Three details that would each be a silent bug:
+
+- `<w:tab/>` means two different things depending on where it sits: a tab
+  character inside a run, and *the definition of a tab stop* inside `w:pPr`.
+  Reading the second as the first indents every paragraph in a document that has
+  a ruler set, which is most of them. Every property element in WordprocessingML
+  ends in `Pr`, so all of them are skipped whole.
+- `<w:delText>` holds text a tracked change **deleted**. Putting it back would
+  show the player a line somebody deliberately took out of the chart.
+- Word writes non-breaking spaces wherever it decides a gap should not be broken,
+  and `Character.isWhitespace` says they are not whitespace. A chord line padded
+  with them is one enormous token, fails the "every token on the line is a chord"
+  test, and the chart quietly stops being transposable. They are turned back into
+  ordinary spaces.
+
+The honest limit is alignment. A chart typed in a proportional font and lined up
+by eye never lined up in *characters*, and columns are exactly what a
+chords-over-lyrics chart means. Monospaced Word charts come out perfectly;
+visually-aligned ones want to be PDFs, and [FORMATS.md](FORMATS.md) says so
+rather than leaving it to be discovered on a stand.
+
+---
+
+## 6. Updating the app from inside the app
+
+There is no Play Store listing, so an update is a downloaded APK and a system
+install prompt. That is a small feature with three sharp edges, and each of them
+is a decision rather than an accident.
+
+### The version the app thinks it is
+
+Every pre-release cut from `dev` is built from the same `gradle.properties`, so
+all of them carry `versionName 0.1.0`. An updater that compared version *names*
+would find `0.1.0` on both sides forever and report "up to date" to a player
+eleven builds behind.
+
+So the identity is the **tag** — `v0.1.0-dev.12` — and CI stamps it into the APK
+as a `BuildConfig` field. The tag is computed in the build job, before anything
+is compiled, and the publish job then uses that same string rather than
+recomputing it. Two copies of that arithmetic drifting apart would produce an app
+convinced it is a release nobody published, which for an updater is a loop: it
+checks, does not match, installs, and still does not match.
+
+A build that CI did not make has no tag, and says "built from source" rather than
+claiming to be the release of that name.
+
+### Comparing two versions is not comparing two strings
+
+`v0.1.0-dev.9` and `v0.1.0-dev.10`. As text the first sorts second, and a player
+on dev.9 is told they are current — and goes on being told that for the next
+ninety releases. Nothing about that failure is visible.
+
+So versions are parsed into a numeric core plus pre-release identifiers and
+compared by SemVer's rules: numeric identifiers numerically, and a version
+carrying a pre-release suffix ranking *below* the same version without one, so
+that publishing `v0.1.0` reads as an upgrade to everyone on a dev build. It is a
+pure function in `:core:update` with a test file to itself, for the same reason
+the transposer is: being wrong here is silent.
+
+The newest release is chosen **by version, not by the order GitHub returned**.
+GitHub sorts by creation time, which is usually the same ordering and is not the
+same thing — a release re-published after deletion, or cut from an older commit,
+arrives out of order and would otherwise be offered as an upgrade to somebody
+already past it.
+
+Going backwards is never offered. Android would allow it: every dev build has the
+same `versionCode`, so the installer sees a reinstall rather than a downgrade and
+raises no objection. The check in this app is the only thing standing between a
+player and being walked backwards, which is why the downgrade case is a test.
+
+`versionCode` is deliberately **not** bumped per pre-release. It would make the
+platform enforce the ordering too, and it would also mean that publishing
+`v0.1.0` — versionCode 1 — to somebody running dev build number 12 would be
+refused by Android as a downgrade. The two schemes cannot both be monotonic, and
+the one that has to work is release-follows-pre-release.
+
+### What actually makes the install safe
+
+Not the download, and not the checksum. **Android refuses to replace an installed
+app with a package signed by a different key**, and that refusal is the security
+boundary: a substituted APK cannot become the DroidMusic on somebody's phone, it
+can only fail to install.
+
+The `SHA256SUMS.txt` published with each release is checked, and it is an
+*integrity* check, not a signature — the checksum comes from the same release as
+the APK, so anyone who could replace one could replace the other. What it earns
+its place catching is the realistic failure: a download truncated by bad venue
+wifi, or a captive portal that answered with a login page and a 200. Those arrive
+as an APK that fails to install with a message explaining nothing. A release with
+no checksum file is reported as unverified rather than quietly accepted.
+
+The honest consequence of the signing rule, and it is worse than it first looks.
+With no signing secrets configured, the release build falls back to the Android
+debug key — and a fresh CI runner has no debug keystore, so the Android Gradle
+Plugin generates **a new one every run**. Three releases were published that way
+before anybody tried to update between two of them, and each was signed by a
+different key: `v0.1.0-dev.12` and `v0.1.0-dev.15` carry certificates whose
+`notBefore` timestamps are their own build times. No release could update any
+other, and the only symptom is Android saying "conflicts with an existing
+package".
+
+Two things follow, and both are now built in:
+
+- **CI reads the fingerprint back out of the assembled APK** and prints it in the
+  release notes, so "can this build update that one" is answerable by looking
+  rather than by trying. When the key is a per-run debug key, the notes say so in
+  a warning rather than a footnote.
+- **The app checks before it offers.** Once an APK is downloaded, its signing
+  certificate is compared with the running app's, and a mismatch is explained
+  where it happens: what Android is about to refuse, why the rule exists, that
+  the only way through is an uninstall, and that an uninstall takes the set lists
+  and the folder list with it. Android's own wording names neither the package
+  nor the conflict, and reads to everybody as "the app is broken".
+
+The real fix is a signing key in the repository's secrets, which the workflow has
+always supported; see the README. Note that even after that, the first properly
+signed release cannot replace a debug-signed one already installed. That one
+install needs an uninstall first.
+
+Separately, the debug *build type* carries a `.debug` application id, so a release
+APK would install beside it rather than over it — which is why the updater
+refuses to run on a debug build instead of doing that to somebody.
+
+### Nothing happens on its own
+
+No check on launch, no periodic check, no background download, no notification.
+Every request is the direct result of somebody pressing a button.
+
+This is not minimalism. An app that decides to fetch nine megabytes over a
+venue's wifi ninety seconds before the first song has done the worst thing a page
+turner can do, and the only way to be sure it never happens is for there to be no
+code that could start it.
+
+---
+
+## 7. Photographing a page
+
+A player without a scanner still has a folder of paper. The camera turns it into
+the library.
+
+### The camera is not in this app
+
+Capture goes through `ACTION_IMAGE_CAPTURE`, so the photograph is taken by
+whatever camera app the phone already has. Three things follow, and they are the
+reason for the choice: **no CAMERA permission is requested at all**, because this
+app never touches the camera; no camera library enters the APK; and the player
+gets the viewfinder they already know, with their own flash, grid and focus.
+
+The alternative was CameraX and an in-app viewfinder, which buys one real thing:
+a live outline of the detected page while aiming, so a badly framed shot is
+obvious before it is taken. That is a genuine loss, and the mitigation is that
+every page is shown back for approval before anything is saved. It is the right
+trade at this size; it would not be if scanning were the app's main job.
+
+### Finding the page without a vision library
+
+OpenCV would do this and is twenty times the size of the rest of the app. ML
+Kit's document scanner would do it better and requires Google Play Services,
+which is a dependency on a phone's provenance rather than on a library.
+
+What is here instead is about a hundred and fifty lines:
+
+1. **Otsu's method** splits the photograph into two brightness classes. Not a
+   fixed threshold: paper under a pub light is a mid grey against a darker grey,
+   and paper by a window is 250 against 30. One fixed cut is right for exactly
+   one of those.
+2. **The class in the middle of the frame is the page**, rather than the brighter
+   one. A player points the camera at the thing they are photographing, and
+   assuming "page = bright" crops dark music on a white table out of its own
+   photograph.
+3. **The largest connected run** of those pixels is the page, which is what makes
+   a lamp or a bright window elsewhere in the shot irrelevant.
+4. **The corners are the extremes** of x+y and x−y over that run. For a convex
+   blob that is exactly the four corners, in four passes, with no line fitting,
+   no Hough transform and nothing to tune. It also degrades into something
+   sensible when an edge is partly in shadow, where contour tracing degrades into
+   nothing.
+
+Straightening is `Matrix.setPolyToPoly` over those four corners — a full
+perspective transform, because a page photographed from slightly above is a
+trapezium and rotating a trapezium leaves a trapezium.
+
+### Refusing is a feature
+
+Four checks reject a detection: too small a share of the frame, too large a share
+(which is what every degenerate case collapses to), a side too short, and a blob
+that does not fill the quad drawn round it — an L, a ring, two patches with a gap.
+
+**Every refusal keeps the photograph whole**, and the page is labelled as kept
+whole so the player knows why it looks like the picture they took. A scanner that
+crops a page through the middle of the last line is worse than one that does
+nothing, because the player only finds out at the stand, and by then the paper is
+at home.
+
+### Why a PDF and where it goes
+
+The app already opens folders of images, so this could have saved four JPEGs. A
+PDF makes them one piece of music: one library row, one set list entry, one file
+to send, and it turns pages in the order they were taken rather than in whatever
+order a file manager considers alphabetical. It is written with the platform's own
+`PdfDocument`, so there is no PDF library in the APK.
+
+Scans are written to the app's managed storage and never into a folder the user
+added. That folder is somebody's Drive, and an app that starts writing files into
+it uninvited has overstepped — which is also why the confirmation for removing a
+folder can promise that nothing in it is ever touched.
+
+---
+
+## 8. Band-leader mode
 
 ### Absolute positions, not instructions
 
@@ -257,7 +546,7 @@ newline framing is only sound if that holds.
 
 ---
 
-## 6. The viewer
+## 9. The viewer
 
 ### Tap zones
 
@@ -284,6 +573,55 @@ depending on the minute.
 In spread mode the left page is kept even, so the same two pages always face
 each other. Allowing it to drift odd would silently re-pair the entire document
 the first time somebody turned back and forward again.
+
+### Double tap to fill the screen with the music
+
+A scan of a piece of sheet music is mostly paper. Fitted to a phone on a stand
+the notation occupies perhaps two thirds of the height and half the width, and
+the player is reading something far smaller than their screen could show. A
+double tap crops the margins away and scales what is left to fill the viewport.
+
+**Finding the edge of the music.** The page is scanned for the box its content
+sits in. Three decisions in that scan are what make it work on real files rather
+than on clean ones:
+
+- **The background is measured, not assumed.** "Crop the white" fails on a
+  photograph taken under a warm light, on a scan with a grey cast, and on a chart
+  printed light on dark. The most common luminance in the page is taken as the
+  paper, whatever it is, and anything far enough from it is ink. It has one known
+  limit, stated rather than hidden: a page more than half covered in ink would
+  invert the sense of that, but sheet music is never remotely that dense.
+- **One dark pixel is not ink.** A speck of scanner dust, a punch hole or a JPEG
+  artefact out in the margin is enough to push the box back to the full page - at
+  which point the zoom silently does nothing, on every page of the scan. So a row
+  counts as printed only once enough pixels in it are ink, which a line of music
+  always has and a speck never does.
+- **The crop leaves a little room.** Cropping exactly to the ink puts the
+  outermost notehead against the edge of the screen, which reads as the page
+  having been cut off even though nothing is missing.
+
+**The page is re-rendered, not magnified.** The crop is handed down to the
+renderer, so a PDF is drawn again at the larger scale and an image is decoded
+with a subsample chosen for the region being shown. Scaling up the bitmap already
+on screen would give identical geometry and none of the extra detail, which on a
+scan is the difference between reading it and squinting at it.
+
+**Zoom survives the page turn.** A player who zooms in is saying that this stand,
+at this distance, needs the music bigger - and that does not stop being true at
+the end of the page. Each page measures its own crop, so a songbook whose margins
+wander still lands right.
+
+**What it costs, and where.** Compose can only tell a single tap from the first
+half of a double tap by waiting out the double tap window, so registering a
+double tap handler delays every tap-to-turn by roughly a third of a second. On an
+app whose whole point is turning pages, that is not a footnote.
+
+Two things keep it contained. The handler is registered **only on pages that can
+be zoomed** - a chord chart has no margins to crop and reflows to fit already, so
+it keeps its instant taps. And a foot switch never comes through the tap surface
+at all, so the pedal, which is what most players actually use on stage, is
+untouched either way. For anyone who taps to turn and would rather have the
+instant turn back, the whole thing is one switch in Settings.
 
 ### Reflow keeps the line, not the page number
 
@@ -315,7 +653,7 @@ syllable and the words open up a little.
 
 ---
 
-## 7. Foot switches
+## 10. Foot switches
 
 The thing that makes this tractable is that both Bluetooth and USB pedals
 present themselves to Android as HID keyboards. By the time the app sees
@@ -348,14 +686,14 @@ it does not also scroll something.
 
 ---
 
-## 8. Building a set list by hand
+## 11. Building a set list by hand
 
 Two gestures, both of them the ones a phone has already taught everybody.
 
 **A long press in the library files a chart into a set list.** The alternative
 is a trip to the set list screen and back for each of twenty songs, and the
 decision is made at the moment the player is looking at the chart and thinking
-"yes, that one" — so that is where it has to be possible. The sheet that opens
+"yes, that one" — so that is where it has to be possible. The dialog that opens
 is the whole flow: the set lists, a way to make a new one, and nothing in
 between. A song already in the list is said so and added anyway, because a song
 that comes back in the encore is in the set twice and that is the band's call.
@@ -369,7 +707,7 @@ because a row that lands one place off still looks like a list and the running
 order is only found to be wrong from the stage.
 
 The order is written when the finger lifts, not on every row it crosses. Each
-save is a whole-file write (section 9), and thirty of them during one drag would
+save is a whole-file write (section 12), and thirty of them during one drag would
 be both slow and a good way to leave a half-written set list behind. Until then
 the screen shows its own copy of the order, because the saved one comes back
 through a file write and a flow and cannot keep up with a moving finger.
@@ -382,7 +720,7 @@ that the finger has gone.
 
 ---
 
-## 9. Storage
+## 12. Storage
 
 Settings, set lists and the file index are JSON files, not a database.
 
@@ -406,7 +744,7 @@ and a random UUID does that perfectly.
 
 ---
 
-## 10. Things deliberately not built
+## 13. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
@@ -420,7 +758,7 @@ and a random UUID does that perfectly.
 - **A cloud account or a sync server.** The band are in the same room. Set lists
   travel as files or over the local network, and nothing needs an account.
 - **Drag-and-drop set list reordering *instead of* buttons.** The drag is built
-  — section 8 — but the up and down buttons stay next to it. A mis-drag that
+  — section 11 — but the up and down buttons stay next to it. A mis-drag that
   silently moves song four to position eleven is not noticed until somebody is
   on stage, and a drag is invisible to a screen reader; the buttons are both the
   careful path and the accessible one.

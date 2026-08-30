@@ -46,6 +46,23 @@ class ViewerController(
         private set
     var mode by mutableStateOf(PageMode.SINGLE)
         private set
+
+    /**
+     * Whether pages are cropped to their content rather than shown whole.
+     *
+     * Deliberately kept across page turns and across songs. A player who zooms
+     * in is telling the app that this stand, at this distance, needs the music
+     * bigger - and that is not something that stops being true at the end of the
+     * page. Each page works out its own crop, so a songbook whose margins wander
+     * still lands right.
+     */
+    var zoomed by mutableStateOf(false)
+        private set
+
+    /** Double tap. Nothing else in the app turns this on or off. */
+    fun toggleZoom() {
+        zoomed = !zoomed
+    }
     var loading by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)

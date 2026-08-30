@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import org.droidmusic.app.DroidMusicApp
 import org.droidmusic.app.data.AppSettings
 import org.droidmusic.app.input.PageAction
+import org.droidmusic.app.capture.CaptureController
+import org.droidmusic.app.capture.CaptureScreen
 import org.droidmusic.app.ui.library.LibraryController
 import org.droidmusic.app.ui.library.LibraryScreen
 import org.droidmusic.app.ui.session.SessionCoordinator
@@ -33,6 +35,8 @@ import org.droidmusic.app.ui.setlist.SetlistDetailScreen
 import org.droidmusic.app.ui.setlist.SetlistsScreen
 import org.droidmusic.app.ui.settings.FootSwitchSetupScreen
 import org.droidmusic.app.ui.settings.SettingsScreen
+import org.droidmusic.app.update.UpdateController
+import org.droidmusic.app.update.UpdatesScreen
 import org.droidmusic.app.ui.viewer.ViewerControls
 import org.droidmusic.app.ui.viewer.ViewerController
 import org.droidmusic.app.ui.viewer.ViewerSurface
@@ -70,6 +74,12 @@ fun DroidMusicRoot(
 
     val libraryController = remember {
         LibraryController(context, app.appScope, app.library, app.settings)
+    }
+
+    val updateController = remember { UpdateController(context, app.appScope) }
+
+    val captureController = remember {
+        CaptureController(context, app.appScope, app.library)
     }
 
     val setlistController = remember {
@@ -218,6 +228,7 @@ fun DroidMusicRoot(
                         onOpenSetlists = { navigator.go(Screen.Setlists) },
                         onOpenSession = { navigator.go(Screen.Session) },
                         onOpenSettings = { navigator.go(Screen.Settings) },
+                        onScan = { navigator.go(Screen.Capture) },
                     )
 
                     val filing = filingSong
@@ -290,6 +301,30 @@ fun DroidMusicRoot(
                     settings = settings,
                     onChange = { transform -> app.settings.updateAsync(transform) },
                     onOpenFootSwitchSetup = { navigator.go(Screen.FootSwitchSetup) },
+                    onOpenUpdates = { navigator.go(Screen.Updates) },
+                    onBack = { navigator.back() },
+                    versionName = DroidMusicApp.VERSION,
+                    releaseTag = updateController.currentTag,
+                )
+
+                Screen.Capture -> CaptureScreen(
+                    controller = captureController,
+                    onBack = { navigator.back() },
+                    onOpenSaved = { song ->
+                        // Straight into the viewer. The player photographed it to
+                        // read it, and making them find it in the library again
+                        // is a step for no reason.
+                        viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
+                        navigator.replace(Screen.Viewer(song.id))
+                    },
+                )
+
+                Screen.Updates -> UpdatesScreen(
+                    controller = updateController,
+                    channel = settings.updateChannel,
+                    onChannelChange = { channel ->
+                        app.settings.updateAsync { it.copy(updateChannel = channel) }
+                    },
                     onBack = { navigator.back() },
                     versionName = DroidMusicApp.VERSION,
                 )

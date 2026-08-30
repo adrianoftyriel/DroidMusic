@@ -35,8 +35,10 @@ fun SettingsScreen(
     settings: AppSettings,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onOpenFootSwitchSetup: () -> Unit,
+    onOpenUpdates: () -> Unit,
     onBack: () -> Unit,
     versionName: String,
+    releaseTag: String?,
 ) {
     Column(
         Modifier
@@ -188,6 +190,23 @@ fun SettingsScreen(
             }
 
             SettingRow(
+                title = "Double tap to zoom",
+                subtitle = "On a scan or a PDF, double tapping crops the margins away and " +
+                    "fills the screen with the music. Double tap again for the whole page. " +
+                    "The cost: where this is possible, a tap has to wait to see whether a " +
+                    "second one is coming, so turning the page by tapping is a little slower. " +
+                    "A foot switch is never affected.",
+                trailing = {
+                    Switch(
+                        checked = settings.viewer.doubleTapToZoom,
+                        onCheckedChange = { on ->
+                            onChange { it.copy(viewer = it.viewer.copy(doubleTapToZoom = on)) }
+                        },
+                    )
+                },
+            )
+
+            SettingRow(
                 title = "Dark chart background",
                 subtitle = "Black page, light text. Kinder on a dark stage; harder to read " +
                     "a scanned PDF on.",
@@ -241,9 +260,19 @@ fun SettingsScreen(
                 },
             )
 
+            SectionLabel("Updates")
+
+            SettingRow(
+                title = "Check for updates",
+                subtitle = "Fetches the newest build from GitHub and installs it. Nothing is " +
+                    "checked or downloaded until you ask for it.",
+                onClick = onOpenUpdates,
+            )
+
             HorizontalDivider(Modifier.padding(vertical = 16.dp))
             Text(
-                "DroidMusic $versionName",
+                releaseTag?.let { "DroidMusic $versionName - release $it" }
+                    ?: "DroidMusic $versionName - built from source",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
