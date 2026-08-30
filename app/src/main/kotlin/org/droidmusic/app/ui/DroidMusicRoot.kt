@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import org.droidmusic.app.DroidMusicApp
 import org.droidmusic.app.data.AppSettings
 import org.droidmusic.app.input.PageAction
+import org.droidmusic.app.capture.CaptureController
+import org.droidmusic.app.capture.CaptureScreen
 import org.droidmusic.app.ui.library.LibraryController
 import org.droidmusic.app.ui.library.LibraryScreen
 import org.droidmusic.app.ui.session.SessionCoordinator
@@ -72,6 +74,10 @@ fun DroidMusicRoot(
     }
 
     val updateController = remember { UpdateController(context, app.appScope) }
+
+    val captureController = remember {
+        CaptureController(context, app.appScope, app.library)
+    }
 
     val setlistController = remember {
         SetlistController(
@@ -212,6 +218,7 @@ fun DroidMusicRoot(
                     onOpenSetlists = { navigator.go(Screen.Setlists) },
                     onOpenSession = { navigator.go(Screen.Session) },
                     onOpenSettings = { navigator.go(Screen.Settings) },
+                    onScan = { navigator.go(Screen.Capture) },
                 )
 
                 Screen.Setlists -> SetlistsScreen(
@@ -267,6 +274,18 @@ fun DroidMusicRoot(
                     onBack = { navigator.back() },
                     versionName = DroidMusicApp.VERSION,
                     releaseTag = updateController.currentTag,
+                )
+
+                Screen.Capture -> CaptureScreen(
+                    controller = captureController,
+                    onBack = { navigator.back() },
+                    onOpenSaved = { song ->
+                        // Straight into the viewer. The player photographed it to
+                        // read it, and making them find it in the library again
+                        // is a step for no reason.
+                        viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
+                        navigator.replace(Screen.Viewer(song.id))
+                    },
                 )
 
                 Screen.Updates -> UpdatesScreen(

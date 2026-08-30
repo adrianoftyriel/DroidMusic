@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -72,6 +73,7 @@ fun LibraryScreen(
     onOpenSetlists: () -> Unit,
     onOpenSession: () -> Unit,
     onOpenSettings: () -> Unit,
+    onScan: () -> Unit,
 ) {
     val index by controller.index.collectAsState()
     var query by remember { mutableStateOf("") }
@@ -124,6 +126,7 @@ fun LibraryScreen(
             title = "Library",
             subtitle = "${index.songs.size} charts in ${index.sources.size} places",
             actions = {
+                HeaderAction(Icons.Filled.PhotoCamera, "Scan music", onScan)
                 HeaderAction(Icons.Filled.Refresh, "Rescan") { controller.rescanAll() }
                 HeaderAction(Icons.Filled.Folder, "Folders and files") { showSources = true }
                 HeaderAction(Icons.Filled.Settings, "Settings", onOpenSettings)
@@ -203,6 +206,7 @@ fun LibraryScreen(
                         TextButton(onClick = { addFiles.launch(DocumentSources.pickFilesIntent()) }) {
                             Text("Or pick individual files")
                         }
+                        TextButton(onClick = onScan) { Text("Or photograph a page") }
                     }
                 },
             )

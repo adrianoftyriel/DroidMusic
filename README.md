@@ -74,6 +74,39 @@ come out as they went in; one aligned by eye in a proportional font never lined
 up in *characters* and wants to be a PDF. [docs/FORMATS.md](docs/FORMATS.md) sets
 out exactly what survives the trip.
 
+### Photographing music
+
+**Point the camera at a page and it becomes a PDF in the library.** DroidMusic
+finds the edges of the page in the photograph, straightens out the angle the
+phone was held at, and files the result. Photograph several pages and they become
+one multi-page PDF — one row in the library, one thing to put in a set list, one
+file to send to a band mate, turning pages in the order you took them.
+
+The camera is Android's own, through an `ACTION_IMAGE_CAPTURE` intent. That means
+**no camera permission is asked for** — the picture is taken by the camera app,
+which already has one — no camera library in the APK, and the viewfinder you
+already know. What it costs is a live outline of the detected page while you
+aim, which is why every page is shown back to you before anything is saved.
+
+Finding the page is done without any vision library:
+[Otsu's method](https://en.wikipedia.org/wiki/Otsu%27s_method) splits the
+photograph into two brightness classes, the class **the middle of the frame**
+belongs to is taken as the page — so dark music on a white table works as well as
+the other way round — the largest connected run of it is the page, and its four
+corners are the extreme points of that run. Straightening is one perspective
+transform, not a rotation, because a page shot from slightly above is a trapezium
+and de-rotating a trapezium leaves a trapezium.
+
+**It would rather do nothing than something wrong.** A blob too small to be a
+page, one filling the entire frame, or one shaped like an L rather than a page is
+refused, and a refusal keeps the photograph whole and says so on the page
+thumbnail. A scanner that mangles a page is worse than one that leaves it alone,
+because the player finds out at the stand.
+
+Scans are saved into the app's own storage, never into a folder you added — a
+folder in somebody's Drive is not somewhere an app should start writing
+uninvited.
+
 ### Turning pages
 
 Tap the **right two thirds** to go forward, the **left third** to go back. The
@@ -346,6 +379,7 @@ would have rewritten the word "Add" as a chord.
 | Updates | SemVer ordering including `dev.9` against `dev.10`; a release outranking its own pre-releases; downgrades never offered; drafts and APK-less releases skipped; the debug APK never chosen; a real releases payload; checksum parsing |
 | Tap zones | The exact 1/3–2/3 split; mirroring; the controls band |
 | Zoom to content | Finding the printed box on a page; dust in the margin ignored; light-on-dark and warm-cast scans; content running to the edge; a page with nothing worth cropping |
+| Page detection | A squared-up page, one shot at an angle, a lamp in the corner of the frame, dark music on a light table, a dim photograph, two pages in shot, and every refusal: too small, whole-frame, and not page-shaped |
 | Foot switches | Auto-repeat; contact bounce; unmapped keys passed back to the system; learn mode |
 | Page layout | Spread parity; end and start detection; zero-page documents |
 

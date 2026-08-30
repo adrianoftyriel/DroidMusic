@@ -397,7 +397,81 @@ code that could start it.
 
 ---
 
-## 7. Band-leader mode
+## 7. Photographing a page
+
+A player without a scanner still has a folder of paper. The camera turns it into
+the library.
+
+### The camera is not in this app
+
+Capture goes through `ACTION_IMAGE_CAPTURE`, so the photograph is taken by
+whatever camera app the phone already has. Three things follow, and they are the
+reason for the choice: **no CAMERA permission is requested at all**, because this
+app never touches the camera; no camera library enters the APK; and the player
+gets the viewfinder they already know, with their own flash, grid and focus.
+
+The alternative was CameraX and an in-app viewfinder, which buys one real thing:
+a live outline of the detected page while aiming, so a badly framed shot is
+obvious before it is taken. That is a genuine loss, and the mitigation is that
+every page is shown back for approval before anything is saved. It is the right
+trade at this size; it would not be if scanning were the app's main job.
+
+### Finding the page without a vision library
+
+OpenCV would do this and is twenty times the size of the rest of the app. ML
+Kit's document scanner would do it better and requires Google Play Services,
+which is a dependency on a phone's provenance rather than on a library.
+
+What is here instead is about a hundred and fifty lines:
+
+1. **Otsu's method** splits the photograph into two brightness classes. Not a
+   fixed threshold: paper under a pub light is a mid grey against a darker grey,
+   and paper by a window is 250 against 30. One fixed cut is right for exactly
+   one of those.
+2. **The class in the middle of the frame is the page**, rather than the brighter
+   one. A player points the camera at the thing they are photographing, and
+   assuming "page = bright" crops dark music on a white table out of its own
+   photograph.
+3. **The largest connected run** of those pixels is the page, which is what makes
+   a lamp or a bright window elsewhere in the shot irrelevant.
+4. **The corners are the extremes** of x+y and x−y over that run. For a convex
+   blob that is exactly the four corners, in four passes, with no line fitting,
+   no Hough transform and nothing to tune. It also degrades into something
+   sensible when an edge is partly in shadow, where contour tracing degrades into
+   nothing.
+
+Straightening is `Matrix.setPolyToPoly` over those four corners — a full
+perspective transform, because a page photographed from slightly above is a
+trapezium and rotating a trapezium leaves a trapezium.
+
+### Refusing is a feature
+
+Four checks reject a detection: too small a share of the frame, too large a share
+(which is what every degenerate case collapses to), a side too short, and a blob
+that does not fill the quad drawn round it — an L, a ring, two patches with a gap.
+
+**Every refusal keeps the photograph whole**, and the page is labelled as kept
+whole so the player knows why it looks like the picture they took. A scanner that
+crops a page through the middle of the last line is worse than one that does
+nothing, because the player only finds out at the stand, and by then the paper is
+at home.
+
+### Why a PDF and where it goes
+
+The app already opens folders of images, so this could have saved four JPEGs. A
+PDF makes them one piece of music: one library row, one set list entry, one file
+to send, and it turns pages in the order they were taken rather than in whatever
+order a file manager considers alphabetical. It is written with the platform's own
+`PdfDocument`, so there is no PDF library in the APK.
+
+Scans are written to the app's managed storage and never into a folder the user
+added. That folder is somebody's Drive, and an app that starts writing files into
+it uninvited has overstepped — which is also why the confirmation for removing a
+folder can promise that nothing in it is ever touched.
+
+---
+
+## 8. Band-leader mode
 
 ### Absolute positions, not instructions
 
@@ -472,7 +546,7 @@ newline framing is only sound if that holds.
 
 ---
 
-## 8. The viewer
+## 9. The viewer
 
 ### Tap zones
 
@@ -579,7 +653,7 @@ syllable and the words open up a little.
 
 ---
 
-## 9. Foot switches
+## 10. Foot switches
 
 The thing that makes this tractable is that both Bluetooth and USB pedals
 present themselves to Android as HID keyboards. By the time the app sees
@@ -612,7 +686,7 @@ it does not also scroll something.
 
 ---
 
-## 10. Storage
+## 11. Storage
 
 Settings, set lists and the file index are JSON files, not a database.
 
@@ -636,7 +710,7 @@ and a random UUID does that perfectly.
 
 ---
 
-## 11. Things deliberately not built
+## 12. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
