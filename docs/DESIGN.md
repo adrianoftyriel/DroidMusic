@@ -500,6 +500,55 @@ In spread mode the left page is kept even, so the same two pages always face
 each other. Allowing it to drift odd would silently re-pair the entire document
 the first time somebody turned back and forward again.
 
+### Double tap to fill the screen with the music
+
+A scan of a piece of sheet music is mostly paper. Fitted to a phone on a stand
+the notation occupies perhaps two thirds of the height and half the width, and
+the player is reading something far smaller than their screen could show. A
+double tap crops the margins away and scales what is left to fill the viewport.
+
+**Finding the edge of the music.** The page is scanned for the box its content
+sits in. Three decisions in that scan are what make it work on real files rather
+than on clean ones:
+
+- **The background is measured, not assumed.** "Crop the white" fails on a
+  photograph taken under a warm light, on a scan with a grey cast, and on a chart
+  printed light on dark. The most common luminance in the page is taken as the
+  paper, whatever it is, and anything far enough from it is ink. It has one known
+  limit, stated rather than hidden: a page more than half covered in ink would
+  invert the sense of that, but sheet music is never remotely that dense.
+- **One dark pixel is not ink.** A speck of scanner dust, a punch hole or a JPEG
+  artefact out in the margin is enough to push the box back to the full page - at
+  which point the zoom silently does nothing, on every page of the scan. So a row
+  counts as printed only once enough pixels in it are ink, which a line of music
+  always has and a speck never does.
+- **The crop leaves a little room.** Cropping exactly to the ink puts the
+  outermost notehead against the edge of the screen, which reads as the page
+  having been cut off even though nothing is missing.
+
+**The page is re-rendered, not magnified.** The crop is handed down to the
+renderer, so a PDF is drawn again at the larger scale and an image is decoded
+with a subsample chosen for the region being shown. Scaling up the bitmap already
+on screen would give identical geometry and none of the extra detail, which on a
+scan is the difference between reading it and squinting at it.
+
+**Zoom survives the page turn.** A player who zooms in is saying that this stand,
+at this distance, needs the music bigger - and that does not stop being true at
+the end of the page. Each page measures its own crop, so a songbook whose margins
+wander still lands right.
+
+**What it costs, and where.** Compose can only tell a single tap from the first
+half of a double tap by waiting out the double tap window, so registering a
+double tap handler delays every tap-to-turn by roughly a third of a second. On an
+app whose whole point is turning pages, that is not a footnote.
+
+Two things keep it contained. The handler is registered **only on pages that can
+be zoomed** - a chord chart has no margins to crop and reflows to fit already, so
+it keeps its instant taps. And a foot switch never comes through the tap surface
+at all, so the pedal, which is what most players actually use on stage, is
+untouched either way. For anyone who taps to turn and would rather have the
+instant turn back, the whole thing is one switch in Settings.
+
 ### Reflow keeps the line, not the page number
 
 A PDF has fixed pages. A chord chart does not — its pagination depends on the

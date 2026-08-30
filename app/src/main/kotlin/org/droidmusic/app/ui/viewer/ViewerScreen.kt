@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.droidmusic.app.input.PageAction
 import org.droidmusic.app.render.RasterPageSource
 import org.droidmusic.app.render.TextPageSource
@@ -85,27 +87,45 @@ fun ViewerSurface(
             )
         }
 
+        // Only pages that are pictures can be cropped to their content, so only
+        // those get a double tap handler.
+        //
+        // That is not tidiness. Compose can only tell a single tap from the first
+        // half of a double tap by waiting out the double tap window, so wherever
+        // onDoubleTap is registered, turning the page by tapping is delayed by
+        // roughly a third of a second. Registering it on chord charts, which have
+        // no margins to crop and nothing to zoom, would spend that delay for
+        // nothing. Foot switches never come through here and are never slowed.
+        val zoomable = preferences.doubleTapToZoom && controller.source is RasterPageSource
+
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(preferences.tapZones, controller.pageCount) {
-                    detectTapGestures { offset ->
-                        when (
-                            preferences.tapZones.actionAt(
-                                x = offset.x,
-                                y = offset.y,
-                                width = size.width.toFloat(),
-                                height = size.height.toFloat(),
-                            )
-                        ) {
-                            PageAction.NEXT_PAGE ->
-                                controller.turn(true, preferences.unicodeAccidentals)
-                            PageAction.PREVIOUS_PAGE ->
-                                controller.turn(false, preferences.unicodeAccidentals)
-                            PageAction.TOGGLE_CONTROLS -> onToggleControls()
-                            else -> Unit
-                        }
-                    }
+                .pointerInput(preferences.tapZones, controller.pageCount, zoomable) {
+                    detectTapGestures(
+                        onDoubleTap = if (zoomable) {
+                            { controller.toggleZoom() }
+                        } else {
+                            null
+                        },
+                        onTap = { offset ->
+                            when (
+                                preferences.tapZones.actionAt(
+                                    x = offset.x,
+                                    y = offset.y,
+                                    width = size.width.toFloat(),
+                                    height = size.height.toFloat(),
+                                )
+                            ) {
+                                PageAction.NEXT_PAGE ->
+                                    controller.turn(true, preferences.unicodeAccidentals)
+                                PageAction.PREVIOUS_PAGE ->
+                                    controller.turn(false, preferences.unicodeAccidentals)
+                                PageAction.TOGGLE_CONTROLS -> onToggleControls()
+                                else -> Unit
+                            }
+                        },
+                    )
                 },
         ) {
             when {
@@ -193,10 +213,37 @@ private fun PageContent(
             var bitmap by remember(source, pageIndex, widthPx, heightPx) {
                 mutableStateOf<Bitmap?>(null)
             }
-            LaunchedEffect(source, pageIndex, widthPx, heightPx) {
-                bitmap = source.render(pageIndex, widthPx, heightPx)
+            var content by remember(source, pageIndex, widthPx, heightPx) {
+                mutableStateOf<ContentRect?>(null)
             }
-            val current = bitmap
+            var croppedBitmap by remember(source, pageIndex, widthPx, heightPx) {
+                mutableStateOf<Bitmap?>(null)
+            }
+
+            LaunchedEffect(source, pageIndex, widthPx, heightPx) {
+                val page = source.render(pageIndex, widthPx, heightPx)
+                bitmap = page
+                // Measured off the fitted page rather than the file, so the
+                // answer is in page coordinates and one scan serves both the
+                // PDF and the image path.
+                content = page?.let { withContext(Dispatchers.Default) { contentRectOf(it) } }
+            }
+
+            // Re-rendered rather than magnified. Scaling up the bitmap already on
+            // screen would give the same geometry and none of the detail, which
+            // on a scan is the difference between reading it and squinting at it.
+            LaunchedEffect(controller.zoomed, content, source, pageIndex, widthPx, heightPx) {
+                val region = content
+                croppedBitmap = if (
+                    controller.zoomed && region != null && region.trimsEnoughToZoom()
+                ) {
+                    source.render(pageIndex, widthPx, heightPx, region)
+                } else {
+                    null
+                }
+            }
+
+            val current = croppedBitmap ?: bitmap
             if (current != null) {
                 androidx.compose.foundation.Image(
                     bitmap = current.asImageBitmap(),
