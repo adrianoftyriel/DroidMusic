@@ -238,16 +238,31 @@ jobs:
             exit 0
           fi
 
-          # SHA-256 of the signing certificate, which is what Android compares.
-          digest=$("$apksigner" verify --print-certs "$apk" \
-            | sed -n 's/.*SHA-256 digest: *\([0-9a-fA-F]*\).*/\1/p' | head -1)
+          # Never let this step be the thing that fails the build. It is
+          # reporting a fact about the APK, and a warning from apksigner about
+          # some older signature scheme is not a reason to throw away a build
+          # that has otherwise passed everything.
+          certs=$("$apksigner" verify --print-certs "$apk" 2>/dev/null || true)
+          digest=$(printf '%s\n' "$certs" \
+            | sed -n 's/.*certificate SHA-256 digest: *\([0-9a-fA-F]*\).*/\1/p' | head -1)
           digest=${digest:-unknown}
 
           echo "fingerprint=$digest" >> "$GITHUB_OUTPUT"
           echo "Release APK signing certificate SHA-256: $digest"
+          printf '%s\n' "$certs" | sed -n 's/.*certificate DN: *//p' | head -1
 
           if [ "${{ steps.signing.outputs.signed }}" != "true" ]; then
             echo "::warning::This APK is debug-signed with a key generated for this run. It cannot update, or be updated by, any other release. Set ANDROID_KEYSTORE_BASE64 and friends to fix this."
+
+            # A pre-release that cannot update anything is a nuisance worth
+            # shipping anyway - it is how people try the app at all right now.
+            # A *release* that cannot be updated is a trap: somebody installs it,
+            # and is then stuck on it until they uninstall and lose their set
+            # lists. So main refuses rather than publishing one.
+            if [ "${{ github.ref_name }}" = "main" ]; then
+              echo "::error::Refusing to publish a release signed with a throwaway debug key. Every run generates a different one, so this build could never be updated in place. Set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD as repository secrets - see the README."
+              exit 1
+            fi
           fi
 
       - name: Collect artefacts
