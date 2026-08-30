@@ -113,6 +113,26 @@ bigger, which is what you can read from a stand. You can force either.
 In spread mode the left page is kept even, so turning back and forward again
 lands where it started rather than silently re-pairing the whole document.
 
+**Double tap a scan to fill the screen with the music.** A page of sheet music is
+mostly paper; on a phone the notation ends up occupying a fraction of a screen
+that could show it far larger. A double tap finds the box the content actually
+sits in, crops the margins away and re-renders the page at the bigger scale -
+re-renders, so it is sharper rather than merely larger. Double tap again for the
+whole page.
+
+It is careful about the things that break this on real files: the paper colour is
+measured rather than assumed to be white, so a warm photograph or a grey scan
+still works; and a speck of scanner dust in the margin cannot quietly push the
+crop back out to the full page, which is the failure that would make the feature
+appear to do nothing at all.
+
+The zoom stays on across page turns, with each page measuring its own margins.
+The cost is one third of a second: where a double tap is possible, a single tap
+has to wait to see whether a second one is coming before it turns the page. That
+delay never applies to chord charts, which have nothing to crop, and never to a
+foot switch. There is a switch in Settings for anyone who would rather have the
+instant tap back.
+
 ### Set lists
 
 A set list is the running order for one night, and each entry carries **its own
@@ -325,6 +345,7 @@ would have rewritten the word "Add" as a chord.
 | Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases |
 | Updates | SemVer ordering including `dev.9` against `dev.10`; a release outranking its own pre-releases; downgrades never offered; drafts and APK-less releases skipped; the debug APK never chosen; a real releases payload; checksum parsing |
 | Tap zones | The exact 1/3–2/3 split; mirroring; the controls band |
+| Zoom to content | Finding the printed box on a page; dust in the margin ignored; light-on-dark and warm-cast scans; content running to the edge; a page with nothing worth cropping |
 | Foot switches | Auto-repeat; contact bounce; unmapped keys passed back to the system; learn mode |
 | Page layout | Spread parity; end and start detection; zero-page documents |
 

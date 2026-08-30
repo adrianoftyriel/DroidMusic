@@ -38,6 +38,17 @@ data class ViewerPreferences(
     val showChordDiagrams: Boolean = false,
     val unicodeAccidentals: Boolean = true,
     val chartFontScale: Float = 1f,
+    /**
+     * Double tap a scanned page to crop its margins away and fill the screen.
+     *
+     * On by default, and it has a cost worth knowing about: a single tap can
+     * only be told from the first half of a double tap by waiting to see whether
+     * a second one arrives, so wherever zooming is possible a tap to turn the
+     * page waits out that window first. Turning this off gives the instant turn
+     * back. A foot switch is never affected either way - it does not go through
+     * the tap surface at all.
+     */
+    val doubleTapToZoom: Boolean = true,
 )
 
 object PageLayoutRules {

@@ -3,6 +3,7 @@ package org.droidmusic.app.render
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -13,6 +14,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.droidmusic.library.FileKind
 import org.droidmusic.library.SongRef
+import org.droidmusic.app.ui.viewer.ContentRect
 import org.droidmusic.music.ChartLayout
 import org.droidmusic.music.ChartRow
 import org.droidmusic.music.Song
@@ -47,7 +49,21 @@ sealed interface PageSource : Closeable {
 
 /** A page source that draws to a bitmap: PDFs and images. */
 interface RasterPageSource : PageSource {
-    suspend fun render(page: Int, widthPx: Int, heightPx: Int): Bitmap?
+    /**
+     * Draws a page to fit [widthPx] by [heightPx].
+     *
+     * [crop] narrows it to a region of the page - the box the music actually
+     * occupies, so that the margins of a scan do not take up half the screen.
+     * It is passed down to the renderer rather than applied to the finished
+     * bitmap, so a PDF re-renders at the larger scale and comes out sharp
+     * instead of being a magnified picture of a smaller one.
+     */
+    suspend fun render(
+        page: Int,
+        widthPx: Int,
+        heightPx: Int,
+        crop: ContentRect? = null,
+    ): Bitmap?
 }
 
 /** A page source that produces text rows: chord charts and tab. */
@@ -73,37 +89,61 @@ class PdfPageSource private constructor(
 
     override val pageCount: Int get() = renderer.pageCount
 
-    override suspend fun render(page: Int, widthPx: Int, heightPx: Int): Bitmap? =
-        withContext(Dispatchers.IO) {
-            if (page !in 0 until pageCount || widthPx <= 0 || heightPx <= 0) return@withContext null
-            mutex.withLock {
-                runCatching {
-                    renderer.openPage(page).use { pdfPage ->
-                        // Fit the page inside the viewport without distorting it.
-                        // Sheet music that has been stretched to fill a screen is
-                        // harder to read, not easier.
-                        val scale = minOf(
-                            widthPx.toFloat() / pdfPage.width,
-                            heightPx.toFloat() / pdfPage.height,
-                        )
-                        val targetWidth = (pdfPage.width * scale).toInt().coerceAtLeast(1)
-                        val targetHeight = (pdfPage.height * scale).toInt().coerceAtLeast(1)
+    override suspend fun render(
+        page: Int,
+        widthPx: Int,
+        heightPx: Int,
+        crop: ContentRect?,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        if (page !in 0 until pageCount || widthPx <= 0 || heightPx <= 0) return@withContext null
+        mutex.withLock {
+            runCatching {
+                renderer.openPage(page).use { pdfPage ->
+                    val pageWidth = pdfPage.width.toFloat()
+                    val pageHeight = pdfPage.height.toFloat()
+                    val region = crop ?: ContentRect.FULL
+                    val regionWidth = (region.width * pageWidth).coerceAtLeast(1f)
+                    val regionHeight = (region.height * pageHeight).coerceAtLeast(1f)
 
-                        val bitmap = Bitmap.createBitmap(
-                            targetWidth,
-                            targetHeight,
-                            Bitmap.Config.ARGB_8888,
-                        )
-                        // The renderer composites onto whatever is already there,
-                        // and a fresh bitmap is transparent. Without this, a scan
-                        // with a transparent background renders as black on black.
-                        bitmap.eraseColor(Color.WHITE)
-                        pdfPage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        bitmap
+                    // Fit the region inside the viewport without distorting it.
+                    // Sheet music that has been stretched to fill a screen is
+                    // harder to read, not easier.
+                    val scale = minOf(widthPx / regionWidth, heightPx / regionHeight)
+                    val targetWidth = (regionWidth * scale).toInt().coerceAtLeast(1)
+                    val targetHeight = (regionHeight * scale).toInt().coerceAtLeast(1)
+
+                    val bitmap = Bitmap.createBitmap(
+                        targetWidth,
+                        targetHeight,
+                        Bitmap.Config.ARGB_8888,
+                    )
+                    // The renderer composites onto whatever is already there,
+                    // and a fresh bitmap is transparent. Without this, a scan
+                    // with a transparent background renders as black on black.
+                    bitmap.eraseColor(Color.WHITE)
+
+                    // No transform at all in the ordinary case, so the untouched
+                    // path stays exactly what it was: the renderer scales the
+                    // page to the bitmap itself.
+                    val transform = if (crop == null) {
+                        null
+                    } else {
+                        Matrix().apply {
+                            setTranslate(-region.left * pageWidth, -region.top * pageHeight)
+                            postScale(scale, scale)
+                        }
                     }
-                }.getOrNull()
-            }
+                    pdfPage.render(
+                        bitmap,
+                        null,
+                        transform,
+                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                    )
+                    bitmap
+                }
+            }.getOrNull()
         }
+    }
 
     override fun close() {
         runCatching { renderer.close() }
@@ -134,29 +174,57 @@ class ImagePageSource(
 
     override val pageCount: Int get() = uris.size
 
-    override suspend fun render(page: Int, widthPx: Int, heightPx: Int): Bitmap? =
-        withContext(Dispatchers.IO) {
-            val uri = uris.getOrNull(page) ?: return@withContext null
-            runCatching {
-                // Two passes: measure, then decode subsampled. A 40-megapixel
-                // phone photo of a chart decoded at full size is 160MB of bitmap
-                // and an immediate out-of-memory kill.
-                val bounds = android.graphics.BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                }
-                context.contentResolver.openInputStream(uri)?.use {
-                    android.graphics.BitmapFactory.decodeStream(it, null, bounds)
-                }
+    override suspend fun render(
+        page: Int,
+        widthPx: Int,
+        heightPx: Int,
+        crop: ContentRect?,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val uri = uris.getOrNull(page) ?: return@withContext null
+        runCatching {
+            // Two passes: measure, then decode subsampled. A 40-megapixel
+            // phone photo of a chart decoded at full size is 160MB of bitmap
+            // and an immediate out-of-memory kill.
+            val bounds = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            context.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, bounds)
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
 
-                val options = android.graphics.BitmapFactory.Options().apply {
-                    inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, widthPx, heightPx)
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                }
-                context.contentResolver.openInputStream(uri)?.use {
-                    android.graphics.BitmapFactory.decodeStream(it, null, options)
-                }
-            }.getOrNull()
-        }
+            val region = crop ?: ContentRect.FULL
+            val regionWidth = (region.width * bounds.outWidth).toInt().coerceAtLeast(1)
+            val regionHeight = (region.height * bounds.outHeight).toInt().coerceAtLeast(1)
+
+            // The subsample is chosen for the *region* being shown, not the whole
+            // file, which is what makes a zoom sharper rather than merely bigger:
+            // the same viewport now holds fewer source pixels, so fewer are
+            // thrown away.
+            val options = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sampleSizeFor(regionWidth, regionHeight, widthPx, heightPx)
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val decoded = context.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, options)
+            } ?: return@runCatching null
+
+            if (crop == null) return@runCatching decoded
+
+            // Crop in the decoded bitmap's own coordinates, which the subsample
+            // has already shrunk.
+            val left = (region.left * decoded.width).toInt().coerceIn(0, decoded.width - 1)
+            val top = (region.top * decoded.height).toInt().coerceIn(0, decoded.height - 1)
+            val width = (region.width * decoded.width).toInt()
+                .coerceIn(1, decoded.width - left)
+            val height = (region.height * decoded.height).toInt()
+                .coerceIn(1, decoded.height - top)
+
+            val cropped = Bitmap.createBitmap(decoded, left, top, width, height)
+            if (cropped !== decoded) decoded.recycle()
+            cropped
+        }.getOrNull()
+    }
 
     override fun close() = Unit
 
