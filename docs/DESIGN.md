@@ -348,7 +348,41 @@ it does not also scroll something.
 
 ---
 
-## 8. Storage
+## 8. Building a set list by hand
+
+Two gestures, both of them the ones a phone has already taught everybody.
+
+**A long press in the library files a chart into a set list.** The alternative
+is a trip to the set list screen and back for each of twenty songs, and the
+decision is made at the moment the player is looking at the chart and thinking
+"yes, that one" — so that is where it has to be possible. The sheet that opens
+is the whole flow: the set lists, a way to make a new one, and nothing in
+between. A song already in the list is said so and added anyway, because a song
+that comes back in the encore is in the set twice and that is the band's call.
+
+**A long press on a row in a set list picks it up to drag.** The row under the
+finger is tracked in viewport coordinates, which is what makes a drag that runs
+off the bottom of the screen pull the list along under it rather than stop at
+the edge. A row takes a neighbour's place when its centre line crosses into it —
+the arithmetic is in `ReorderGeometry`, out of the composable and tested,
+because a row that lands one place off still looks like a list and the running
+order is only found to be wrong from the stage.
+
+The order is written when the finger lifts, not on every row it crosses. Each
+save is a whole-file write (section 9), and thirty of them during one drag would
+be both slow and a good way to leave a half-written set list behind. Until then
+the screen shows its own copy of the order, because the saved one comes back
+through a file write and a flow and cannot keep up with a moving finger.
+
+One wrinkle worth writing down: a long press that never becomes a drag still
+ends with a finger lifting, and a plain clickable row reads that as a tap. So
+the flag that suppresses the tap goes up when the press is recognised, not when
+the drag ends — the click can be delivered before the gesture detector hears
+that the finger has gone.
+
+---
+
+## 9. Storage
 
 Settings, set lists and the file index are JSON files, not a database.
 
@@ -372,7 +406,7 @@ and a random UUID does that perfectly.
 
 ---
 
-## 9. Things deliberately not built
+## 10. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
@@ -385,7 +419,8 @@ and a random UUID does that perfectly.
   and a chart that turns itself at the wrong moment is worse than no feature.
 - **A cloud account or a sync server.** The band are in the same room. Set lists
   travel as files or over the local network, and nothing needs an account.
-- **Drag-and-drop set list reordering.** Buttons instead. Drag demos better and
-  is worse here: this is used on a phone balanced on an amp ten minutes before a
-  set, and a mis-drag that silently moves song four to position eleven is not
-  noticed until somebody is on stage.
+- **Drag-and-drop set list reordering *instead of* buttons.** The drag is built
+  — section 8 — but the up and down buttons stay next to it. A mis-drag that
+  silently moves song four to position eleven is not noticed until somebody is
+  on stage, and a drag is invisible to a screen reader; the buttons are both the
+  careful path and the accessible one.

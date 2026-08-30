@@ -4,35 +4,45 @@ import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,7 +52,10 @@ import org.droidmusic.app.ui.common.EmptyState
 import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.HeaderAction
 import org.droidmusic.app.ui.common.Pill
+import org.droidmusic.app.ui.common.dragToReorder
+import org.droidmusic.app.ui.common.rememberDragReorderState
 import org.droidmusic.library.Setlist
+import org.droidmusic.library.SetlistEntry
 import org.droidmusic.library.SongRef
 
 @Composable
@@ -173,10 +186,17 @@ fun SetlistsScreen(
 /**
  * One set list, in the order it will be played.
  *
- * Reordering is by up and down buttons rather than drag and drop. Drag looks
- * better in a demo and is worse here: this gets used on a phone balanced on an
- * amp, ten minutes before a set, and a mis-drag that silently moves song four to
- * position eleven is a problem nobody notices until they are on stage.
+ * There are two ways to move a song, and both are here on purpose. Press, hold
+ * and drag is what a hand reaches for, and it is the only sane way to move the
+ * last song of the night up to third. The up and down buttons stay because a
+ * drag on a phone balanced on an amp ten minutes before a set is easy to get
+ * wrong, and because a drag is invisible to a screen reader - so the buttons are
+ * both the careful path and the accessible one.
+ *
+ * A drag is committed when the finger lifts, not on every row it crosses. Each
+ * save is a whole-file write, and writing the running order thirty times during
+ * one drag would be both slow and a good way to leave a half-written set list
+ * behind if the app dies mid-gesture.
  */
 @Composable
 fun SetlistDetailScreen(
@@ -187,10 +207,44 @@ fun SetlistDetailScreen(
     onPlay: (Int) -> Unit,
     onAddSongs: () -> Unit,
 ) {
+    // The order under the finger. The saved one comes back through a file write
+    // and a flow, which cannot keep up with a drag, so while one is in flight
+    // this screen shows its own copy and then goes back to following the store.
+    var pendingOrder by remember(setlist.id) { mutableStateOf<List<SetlistEntry>?>(null) }
+    val entries = pendingOrder ?: setlist.entries
+
+    // The gesture detector on a row is set up once and then keeps whatever it
+    // closed over, so the set list it saves has to be read through state at the
+    // moment the finger lifts rather than captured when the row was composed.
+    val currentSetlist by rememberUpdatedState(setlist)
+
+    val listState = rememberLazyListState()
+    val dragState = rememberDragReorderState(listState) { from, to ->
+        val current = pendingOrder ?: setlist.entries
+        if (from in current.indices && to in current.indices) {
+            pendingOrder = current.toMutableList().apply { add(to, removeAt(from)) }
+        }
+    }
+
+    LaunchedEffect(setlist.entries) {
+        if (pendingOrder == setlist.entries) pendingOrder = null
+    }
+
+    // Stable across a reorder, unlike the position, so a row that moves is the
+    // same row to the list rather than a new one appearing where it landed.
+    val rowKeys = remember(entries) {
+        val seen = mutableMapOf<String, Int>()
+        entries.map { entry ->
+            val nth = (seen[entry.songId] ?: 0) + 1
+            seen[entry.songId] = nth
+            "${entry.songId}#$nth"
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Header(
             title = setlist.name,
-            subtitle = "${setlist.size} songs",
+            subtitle = "${entries.size} songs",
             onBack = onBack,
             actions = {
                 HeaderAction(Icons.Filled.Add, "Add songs", onAddSongs)
@@ -199,10 +253,11 @@ fun SetlistDetailScreen(
             },
         )
 
-        if (setlist.entries.isEmpty()) {
+        if (entries.isEmpty()) {
             EmptyState(
                 title = "Empty set list",
-                body = "Add charts from the library to build the running order.",
+                body = "Add charts from the library to build the running order. Press and " +
+                    "hold a song there to file it straight into this list.",
                 action = { Button(onClick = onAddSongs) { Text("Add songs") } },
             )
             return@Column
@@ -215,21 +270,55 @@ fun SetlistDetailScreen(
             Button(onClick = { onPlay(0) }) { Text("Start the set") }
         }
 
-        LazyColumn(Modifier.fillMaxSize()) {
-            itemsIndexed(setlist.entries, key = { index, e -> "$index-${e.songId}" }) { index, entry ->
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            itemsIndexed(entries, key = { index, _ -> rowKeys[index] }) { index, entry ->
                 val song = songFor(entry.songId)
+                val dragging = dragState.draggingIndex == index
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { onPlay(index) }
+                        .dragToReorder(dragState, index, rowKeys[index]) {
+                            val order = pendingOrder
+                            val saved = currentSetlist
+                            when {
+                                order == null -> Unit
+                                order == saved.entries -> pendingOrder = null
+                                else -> controller.save(saved.copy(entries = order))
+                            }
+                        }
+                        .background(
+                            if (dragging) {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                        )
+                        .clickable {
+                            // Not while a drag is being saved: the positions on
+                            // screen and the positions in the stored list are
+                            // the same again a moment later, and opening the
+                            // wrong song is not a moment anyone wants.
+                            val held = dragState.consumeSuppressedClick()
+                            if (!held && pendingOrder == null) onPlay(index)
+                        }
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Icon(
+                        imageVector = Icons.Filled.DragHandle,
+                        // The row itself is the drag target, and the buttons
+                        // beside it already say "move up" and "move down" out
+                        // loud; announcing a third control here would only be
+                        // one more thing to swipe past.
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
                     Text(
                         "${index + 1}",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 10.dp),
+                        modifier = Modifier.padding(start = 6.dp, end = 10.dp),
                     )
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -267,10 +356,121 @@ fun SetlistDetailScreen(
                     HeaderAction(Icons.Filled.KeyboardArrowDown, "Move down") {
                         controller.move(setlist, index, index + 1)
                     }
-                    HeaderAction(Icons.Filled.PlayArrow, "Open") { onPlay(index) }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
             }
         }
     }
+}
+
+/**
+ * Files one chart into a set list, from a long press in the library.
+ *
+ * This is deliberately the whole of the flow: the list of set lists, the way to
+ * make a new one, and no step in between. Adding a song is something that
+ * happens forty times in an evening while the running order is being worked out,
+ * and a flow that starts by asking which screen you would like to go to first
+ * does not survive that.
+ */
+@Composable
+fun AddToSetlistDialog(
+    song: SongRef,
+    controller: SetlistController,
+    onDismiss: () -> Unit,
+    onAdded: (Setlist) -> Unit,
+) {
+    val book by controller.book.collectAsState()
+    // With nothing to add to, the choice is not a choice; go straight to making
+    // the first set list.
+    var naming by remember { mutableStateOf(book.setlists.isEmpty()) }
+    var newName by remember { mutableStateOf("") }
+
+    if (naming) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("New set list") },
+            text = {
+                Column {
+                    Text(
+                        "\"${song.bestTitle}\" goes in as the first song.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newName.isNotBlank(),
+                    onClick = {
+                        onAdded(controller.create(newName.trim(), listOf(song)))
+                        onDismiss()
+                    },
+                ) { Text("Create and add") }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add to a set list") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    song.bestTitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(8.dp))
+                for (setlist in book.setlists) {
+                    // Said, not prevented. A song that comes back in the encore
+                    // is in the set twice, and that is the band's call.
+                    val already = setlist.entries.count { it.songId == song.id }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                controller.add(setlist, song)
+                                onAdded(setlist)
+                                onDismiss()
+                            }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(setlist.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                listOfNotNull(
+                                    "${setlist.size} songs",
+                                    setlist.venue,
+                                    if (already > 0) "already in this list" else null,
+                                ).joinToString(" - "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    newName = ""
+                    naming = true
+                },
+            ) { Text("New set list") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

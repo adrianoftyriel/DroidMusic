@@ -1,5 +1,6 @@
 package org.droidmusic.app.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import org.droidmusic.app.ui.library.LibraryScreen
 import org.droidmusic.app.ui.session.SessionCoordinator
 import org.droidmusic.app.ui.session.SessionRole
 import org.droidmusic.app.ui.session.SessionScreen
+import org.droidmusic.app.ui.setlist.AddToSetlistDialog
 import org.droidmusic.app.ui.setlist.SetlistController
 import org.droidmusic.app.ui.setlist.SetlistDetailScreen
 import org.droidmusic.app.ui.setlist.SetlistsScreen
@@ -34,6 +36,7 @@ import org.droidmusic.app.ui.settings.SettingsScreen
 import org.droidmusic.app.ui.viewer.ViewerControls
 import org.droidmusic.app.ui.viewer.ViewerController
 import org.droidmusic.app.ui.viewer.ViewerSurface
+import org.droidmusic.library.SongRef
 
 /**
  * The whole app, assembled.
@@ -85,6 +88,11 @@ fun DroidMusicRoot(
     }
 
     var controlsVisible by remember { mutableStateOf(false) }
+
+    // The chart being filed into a set list, from a long press in the library.
+    // Held here rather than in the library screen because the set lists are not
+    // the library's business.
+    var filingSong by remember { mutableStateOf<SongRef?>(null) }
 
     // The viewer reports every move; the coordinator decides whether anyone else
     // needs to hear about it. Wiring it here keeps the viewer ignorant of
@@ -199,16 +207,39 @@ fun DroidMusicRoot(
             color = MaterialTheme.colorScheme.background,
         ) {
             when (val screen = currentScreen) {
-                Screen.Library -> LibraryScreen(
-                    controller = libraryController,
-                    onOpenSong = { song ->
-                        viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
-                        navigator.go(Screen.Viewer(song.id))
-                    },
-                    onOpenSetlists = { navigator.go(Screen.Setlists) },
-                    onOpenSession = { navigator.go(Screen.Session) },
-                    onOpenSettings = { navigator.go(Screen.Settings) },
-                )
+                Screen.Library -> {
+                    LibraryScreen(
+                        controller = libraryController,
+                        onOpenSong = { song ->
+                            viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
+                            navigator.go(Screen.Viewer(song.id))
+                        },
+                        onAddSongToSetlist = { filingSong = it },
+                        onOpenSetlists = { navigator.go(Screen.Setlists) },
+                        onOpenSession = { navigator.go(Screen.Session) },
+                        onOpenSettings = { navigator.go(Screen.Settings) },
+                    )
+
+                    val filing = filingSong
+                    if (filing != null) {
+                        AddToSetlistDialog(
+                            song = filing,
+                            controller = setlistController,
+                            onDismiss = { filingSong = null },
+                            // A toast rather than a trip to the set list. The
+                            // player is filing twenty songs in a row and wants
+                            // to stay where they are; what they need to know is
+                            // that it landed, and which list it landed in.
+                            onAdded = { setlist ->
+                                Toast.makeText(
+                                    context,
+                                    "Added \"${filing.bestTitle}\" to ${setlist.name}",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                        )
+                    }
+                }
 
                 Screen.Setlists -> SetlistsScreen(
                     controller = setlistController,

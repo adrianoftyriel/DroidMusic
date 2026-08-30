@@ -4,7 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +58,7 @@ import org.droidmusic.library.SongRef
 fun LibraryScreen(
     controller: LibraryController,
     onOpenSong: (SongRef) -> Unit,
+    onAddSongToSetlist: (SongRef) -> Unit,
     onOpenSetlists: () -> Unit,
     onOpenSession: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -184,9 +186,18 @@ fun LibraryScreen(
             )
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                item { SectionLabel("${songs.size} charts") }
+                item {
+                    // Where the gesture gets discovered. A press and hold that
+                    // nobody knows about is not a feature.
+                    SectionLabel("${songs.size} charts - hold one to add it to a set list")
+                }
                 items(songs, key = { it.id }) { song ->
-                    SongRow(song, controller.sourceLabel(index, song.sourceId)) { onOpenSong(song) }
+                    SongRow(
+                        song = song,
+                        sourceLabel = controller.sourceLabel(index, song.sourceId),
+                        onClick = { onOpenSong(song) },
+                        onLongClick = { onAddSongToSetlist(song) },
+                    )
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                 }
             }
@@ -194,12 +205,31 @@ fun LibraryScreen(
     }
 }
 
+/**
+ * One chart in the list.
+ *
+ * A tap opens it and a press and hold files it into a set list, which is the
+ * pairing every list on a phone already uses. Building tonight's running order
+ * is otherwise a trip to another screen and back for each of twenty songs, and
+ * it is done at the point where the player is looking at the chart and thinking
+ * "yes, that one" - so that is where it should be possible.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SongRow(song: SongRef, sourceLabel: String, onClick: () -> Unit) {
+private fun SongRow(
+    song: SongRef,
+    sourceLabel: String,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onLongClickLabel = "Add to a set list",
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

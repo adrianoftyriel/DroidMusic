@@ -93,6 +93,14 @@ A set list is the running order for one night, and each entry carries **its own
 key and capo** — because the same chart gets sung in different keys by different
 singers, and that decision belongs to the night, not to the file.
 
+Building one is two gestures. **Press and hold a chart in the library** to file
+it into a set list, without leaving the library or losing your place in it.
+**Press, hold and drag a song inside a set list** to move it — the list scrolls
+under the drag when it reaches the edge, and the order is saved when you lift
+your finger. The up and down buttons on each row do the same job for anyone who
+would rather not risk a drag ten minutes before a set, or who is using a screen
+reader.
+
 They travel two ways, and both matter:
 
 - **As a file** (`.dmset`, plain JSON) through the share sheet — email, a

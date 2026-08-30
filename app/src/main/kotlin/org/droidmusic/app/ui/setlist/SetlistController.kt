@@ -46,11 +46,19 @@ class SetlistController(
     var importMessage by mutableStateOf<String?>(null)
         private set
 
-    fun create(name: String): Setlist {
+    /**
+     * Makes a new set list, optionally with its first songs already in it.
+     *
+     * Creating and then adding would be two writes racing each other through the
+     * same store, which on a phone that is about to be locked and put in a
+     * pocket is a set list that comes back empty. One write cannot half-happen.
+     */
+    fun create(name: String, songs: List<SongRef> = emptyList()): Setlist {
         val now = System.currentTimeMillis()
         val setlist = Setlist(
             id = UUID.randomUUID().toString(),
             name = name,
+            entries = songs.map(::entryFor),
             createdAt = now,
             updatedAt = now,
         )
@@ -63,17 +71,22 @@ class SetlistController(
     }
 
     fun add(setlist: Setlist, song: SongRef) {
-        save(
-            setlist.copy(
-                entries = setlist.entries + SetlistEntry(
-                    songId = song.id,
-                    title = song.bestTitle,
-                    contentHash = song.contentHash,
-                    artist = song.artist,
-                ),
-            ),
-        )
+        save(setlist.copy(entries = setlist.entries + entryFor(song)))
     }
+
+    /**
+     * A song as it enters a set list.
+     *
+     * The title and content hash are copied in rather than looked up later, so
+     * the entry still says what it is on a device whose library has never seen
+     * this chart - which is every device the list gets sent to.
+     */
+    private fun entryFor(song: SongRef) = SetlistEntry(
+        songId = song.id,
+        title = song.bestTitle,
+        contentHash = song.contentHash,
+        artist = song.artist,
+    )
 
     fun move(setlist: Setlist, from: Int, to: Int) = save(setlist.moved(from, to))
 
