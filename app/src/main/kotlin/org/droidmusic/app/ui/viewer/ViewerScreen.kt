@@ -298,6 +298,10 @@ private fun ChartPage(rows: List<ChartRow>, fontSizeSp: Float, dark: Boolean) {
                 RowKind.CHORDS -> ChartLine(row.chordText, fontSizeSp, chordInk, bold = true)
                 RowKind.LYRIC -> ChartLine(row.text, fontSizeSp, ink)
                 RowKind.TAB -> ChartLine(row.text, fontSizeSp, ink)
+                // A grid is chords in a rectangle of cells. Drawn in the chord
+                // colour, since that is what it is made of, and never reflowed -
+                // the columns are the notation, exactly as in tablature.
+                RowKind.GRID -> ChartLine(row.text, fontSizeSp, chordInk)
                 RowKind.COMMENT -> ChartLine(row.text, fontSizeSp, quietInk, italic = true)
                 RowKind.HEADER -> {
                     Spacer(Modifier.height(6.dp))
@@ -310,6 +314,9 @@ private fun ChartPage(rows: List<ChartRow>, fontSizeSp: Float, dark: Boolean) {
                     )
                 }
                 RowKind.BLANK -> Spacer(Modifier.height((fontSizeSp * 0.7f).dp))
+                // A break has already done its work in ChartLayout.paginate,
+                // which started a fresh page at it. There is nothing left to draw.
+                RowKind.BREAK -> Unit
             }
         }
     }

@@ -1,6 +1,6 @@
 package org.droidmusic.music
 
-enum class RowKind { CHORDS, LYRIC, CHORD_AND_LYRIC, COMMENT, TAB, HEADER, BLANK }
+enum class RowKind { CHORDS, LYRIC, CHORD_AND_LYRIC, COMMENT, TAB, GRID, HEADER, BREAK, BLANK }
 
 /**
  * One row of the laid-out chart.
@@ -15,7 +15,11 @@ data class ChartRow(
     val text: String = "",
 ) {
     /** How many lines of text this row draws. */
-    val height: Int get() = if (kind == RowKind.CHORD_AND_LYRIC) 2 else 1
+    val height: Int get() = when (kind) {
+        RowKind.CHORD_AND_LYRIC -> 2
+        RowKind.BREAK -> 0
+        else -> 1
+    }
 
     /** Longest line in the row, for working out how wide the chart needs to be. */
     val width: Int get() = maxOf(chordText.length, text.length)
@@ -31,7 +35,7 @@ data class ChartRow(
 object ChartLayout {
 
     fun rows(song: Song, unicodeAccidentals: Boolean = true): List<ChartRow> =
-        song.lines.map { line ->
+        song.lines.mapNotNull { line ->
             when (line) {
                 is Line.Lyric -> {
                     val (chordRow, lyricRow) = SongWriter.layoutLyricLine(line, unicodeAccidentals)
@@ -46,8 +50,22 @@ object ChartLayout {
                 }
 
                 is Line.Comment -> ChartRow(RowKind.COMMENT, text = line.text)
+
+                // A `{chorus}` says "play the chorus here". Drawn like a comment
+                // because that is what it is to somebody reading off a stand -
+                // an instruction, not a line to sing.
+                is Line.ChorusRecall -> ChartRow(RowKind.COMMENT, text = line.label ?: "Chorus")
+
                 is Line.Tab -> ChartRow(RowKind.TAB, text = line.text)
-                is Line.SectionHeader -> ChartRow(RowKind.HEADER, text = line.label)
+                is Line.Grid -> ChartRow(RowKind.GRID, text = line.plainText)
+                is Line.SectionHeader -> ChartRow(RowKind.HEADER, text = line.displayLabel)
+                is Line.Break -> ChartRow(RowKind.BREAK)
+
+                // A section end draws nothing, so it gets no row at all. Giving
+                // it an empty one would open a gap in the middle of the chart
+                // wherever a verse finished.
+                is Line.SectionEnd -> null
+
                 Line.Blank -> ChartRow(RowKind.BLANK)
             }
         }
@@ -89,6 +107,15 @@ object ChartLayout {
             // A blank line at the top of a page is a gap nobody asked for.
             if (used == 0 && row.kind == RowKind.BLANK) {
                 index++
+                continue
+            }
+
+            // A chart that asked for a page break gets one. The chart's author
+            // knows something the arithmetic does not - that this is where the
+            // player has a free hand to turn.
+            if (row.kind == RowKind.BREAK) {
+                index++
+                if (used > 0) flush()
                 continue
             }
 

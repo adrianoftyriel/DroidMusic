@@ -63,30 +63,140 @@ did not appear is not.
 
 ## ChordPro
 
-Directives understood:
+Read against the [ChordPro file format
+specification](https://www.chordpro.org/chordpro/), version 6. Where the
+specification is silent or disagrees with itself, the
+[reference implementation](https://github.com/ChordPro/chordpro) is the
+tie-breaker - which is what the specification itself says to do.
+
+### The shape of a file
+
+A chart is lyrics with `[C]` chords in them, `{directives}` in braces, blank
+lines and `#` remarks. Before any line is asked what it means:
+
+| Written | Read as |
+|---|---|
+| A line ending in `\` | Joined to the next line, whose leading whitespace goes |
+| `♥`, `\u{1F3B8}`, a surrogate pair | The character named |
+| A tab | One space - not a jump to the next tab stop |
+| `#` in **column zero** | A remark, dropped |
+| `  #` indented | A lyric that starts with a hash |
+
+The remark test is anchored at column zero on purpose. Tablature is full of
+lines a looser reading would delete.
+
+### Directives
+
+The name is separated from its argument by a colon, a space, or both, so
+`{title: X}`, `{title X}` and `{title:X}` are one directive. Arguments may also
+be named, HTML-style: `{start_of_verse: label="Verse 1"}`.
 
 | Directive | Aliases | Effect |
 |---|---|---|
-| `{title:}` | `{t:}` | Title |
+| `{title:}` `{sorttitle:}` | `{t:}` | Title |
 | `{subtitle:}` | `{st:}` | Subtitle |
-| `{artist:}` | `{composer:}` | Artist |
-| `{key:}` | | Declared key — overrides detection |
-| `{capo:}` | | Capo position |
-| `{tempo:}` | `{bpm:}` | Tempo |
-| `{time:}` | `{meter:}` | Time signature |
-| `{comment:}` | `{c:}` `{ci:}` `{cb:}` | A line of comment |
-| `{start_of_chorus}` | `{soc}` | Section heading |
-| `{start_of_verse}` | `{sov}` | Section heading |
-| `{start_of_bridge}` | `{sob}` | Section heading |
-| `{start_of_grid}` | `{sog}` | Section heading |
-| `{start_of_tab}` … `{end_of_tab}` | `{sot}` `{eot}` | Held verbatim |
+| `{artist:}` `{sortartist:}` `{composer:}` `{lyricist:}` `{arranger:}` | | Who made it |
+| `{album:}` `{year:}` `{copyright:}` | | Where it came from |
+| `{key:}` | | Declared key - overrides detection |
+| `{capo:}` `{tempo:}` `{time:}` `{duration:}` | | How to play it |
+| `{transpose:}` | | Semitones the file itself asks for |
+| `{meta: name value}` | | Any of the above, and anything else |
+| `{comment:}` | `{c:}` | A line of comment |
+| `{comment_italic:}` `{comment_box:}` `{highlight:}` | `{ci:}` `{cb:}` | The same, styled |
+| `{start_of_X:}` … `{end_of_X}` | | A section - **any** name |
+| `{start_of_chorus:}` … | `{soc}` `{eoc}` | Chorus |
+| `{start_of_verse:}` … | `{sov}` `{eov}` | Verse |
+| `{start_of_bridge:}` … | `{sob}` `{eob}` | Bridge |
+| `{start_of_tab:}` … | `{sot}` `{eot}` | Held verbatim |
+| `{start_of_grid:}` … | `{sog}` `{eog}` | A chord grid |
+| `{chorus}` | | Play the chorus here |
+| `{new_page}` `{new_physical_page}` | `{np}` `{npp}` | Start a new page |
+| `{column_break}` | `{colb}` | Start a new column |
 
-Anything else is kept so export can round-trip it.
+`{cb}` is a **boxed comment**, not a column break. The published cheat sheet says
+otherwise and the reference implementation does not; `cb` in real charts is
+overwhelmingly a boxed comment, so the reference wins.
 
-Bracket contents that do not parse as a chord are **kept as literal text** rather
-than dropped — charts use brackets for annotations like `[x2]` and `[slowly]`,
-and silently deleting somebody's performance note would be worse than showing
-it.
+Everything else a chart declares - `{tuning:}`, `{define:}`, fonts, colours,
+page sizes, `{x_myapp_whatever}` - is kept so that exporting a transposed chart
+does not throw away the parts of it that were never about transposition.
+
+### Sections can be called anything
+
+ChordPro 6 lets a chart name a section whatever it likes, and only `chorus`,
+`tab` and `grid` behave specially. `{start_of_part: Solo}` is a section called
+`part` labelled "Solo", and it is written back out as itself rather than being
+flattened into a comment. A section left unclosed at the end of a file is closed
+silently - the intent is obvious, and refusing to draw the last verse over a
+missing `{end_of_verse}` would be a strange thing to do on a stand.
+
+An unlabelled section is shown under its own name, so `{start_of_intro_riff}`
+draws as "Intro Riff" - but it is still *unlabelled*, and exporting does not put
+a label on a line that never had one.
+
+### Conditional directives
+
+`{comment-alto: Very softly}` applies only when the selector matches, and `!`
+reverses it. DroidMusic configures neither an instrument nor a user, so only the
+metadata test can succeed: a selector naming something the chart itself declared
+selects, and anything else does not. A deselected `{start_of_X}` takes the whole
+section with it, contents and directives alike.
+
+This means the alto's note does not appear on the tenor's stand. Showing every
+variant of a conditional line at once would be worse than showing none.
+
+### Chords and annotations
+
+What is in the brackets is a chord if it parses as one, and an **annotation**
+otherwise - printed where a chord would go, and not transposed.
+
+| Written | Read as |
+|---|---|
+| `[C]` `[Bm7b5]` `[D/F#]` | The chord |
+| `[(C)]` | The chord `C` - play it if you like |
+| `[*Coda]` `[*Rit.]` | An annotation, explicitly |
+| `[x2]` `[slowly]` | An annotation, because it is not a chord |
+| `[\|]` `[  ]` | An annotation - a bar with no chord change |
+
+`[x2]` used to be pushed into the middle of the lyric, where it reads as
+something to sing. Above the line, in the column it was written in, is where the
+writer meant it.
+
+Exporting only stars an annotation when leaving the star off would change it: an
+annotation that happens to spell a chord, or one that starts with a star. `[x2]`
+is written back as `[x2]`.
+
+### Grids
+
+A `{start_of_grid}` block is a jazz grille - chords in a rectangle of cells
+divided by bar lines. The columns are kept exactly as written, and the chords in
+them transpose with the rest of the song, which the specification requires. When
+transposition makes a chord wider, the space after it gives way so the next bar
+line stays in its column.
+
+Bar lines, repeats, voltas, `%` measure repeats, margin notes and strum arrows
+are held verbatim. The visual grid - drawn cells and rules - is a renderer
+feature and is not drawn; a grid appears as the text it was written as.
+
+### Two deliberate departures
+
+- **Bare tablature is recognised.** A run of `e|---9-7--|` lines that nobody
+  wrapped in `{start_of_tab}` is still tablature, and is held verbatim rather
+  than laid out as lyrics. The specification has no notion of detecting tab, but
+  charts from the usual places look like this constantly. Exporting supplies the
+  `{start_of_tab}` the original was missing, so the file other tools read means
+  what this one meant.
+- **A chart is one song.** `{new_song}` is kept so exporting does not destroy it,
+  but a file holding a songbook is read as its first song. The library is a list
+  of charts, and splitting one file into several entries behind the user's back
+  would be worse than not reading the rest.
+
+### What is not implemented
+
+Chord diagrams (`{define:}`, `{chord:}`), images, the delegated environments
+(`abc`, `ly`, `svg`, `textblock`), markup (`<b>`, `<span>`), and the font, size
+and colour directives are **preserved but not drawn**. They describe a printed
+page, and this is a screen on a stand.
 
 ---
 

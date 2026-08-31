@@ -78,7 +78,24 @@ object Transposer {
             when (line) {
                 is Line.Lyric -> Line.Lyric(
                     line.segments.map { seg ->
-                        Segment(seg.chord?.transpose(interval), seg.text)
+                        // The annotation rides along untouched. `[*Coda]` is a
+                        // direction to the player, not a pitch, and transposing
+                        // it would be nonsense.
+                        Segment(seg.chord?.transpose(interval), seg.text, seg.annotation)
+                    },
+                )
+
+                // Grid chords transpose with the song, which the ChordPro
+                // specification requires. Each token keeps the text it was
+                // written as, so the writer can tell how far the columns moved
+                // and put them back.
+                is Line.Grid -> Line.Grid(
+                    line.tokens.map { token ->
+                        when (token) {
+                            is GridToken.Chord ->
+                                GridToken.Chord(token.chord.transpose(interval), token.text)
+                            is GridToken.Symbol -> token
+                        }
                     },
                 )
 

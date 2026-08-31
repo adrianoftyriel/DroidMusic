@@ -140,12 +140,12 @@ object UltimateGuitar {
         val lines = parsed.lines.map(::asSectionHeaderIfLabelled)
 
         val extra = buildMap {
-            chart.tuning?.takeIf { it.isNotBlank() }?.let { put("tuning", it) }
+            chart.tuning?.takeIf { it.isNotBlank() }?.let { put("tuning", listOf(it)) }
             // Where it came from, kept in the file. A chart that turns out to be
             // somebody's rough transcription is worth being able to trace back,
             // and the alternative is that the only copy of that fact is in the
             // share sheet of a browser session that closed months ago.
-            chart.sourceUrl?.takeIf { it.isNotBlank() }?.let { put("source", it) }
+            chart.sourceUrl?.takeIf { it.isNotBlank() }?.let { put("source", listOf(it)) }
         }
 
         val meta = parsed.meta.copy(
@@ -275,6 +275,9 @@ object UltimateGuitar {
         if (label.isEmpty() || !label.first().isLetter()) return line
         if (REPEAT_MARKER.matches(label)) return line
 
+        // A heading ChordPro has no environment for - "Intro", "Guitar Solo" -
+        // stays a header here and is written out as a comment; see
+        // SongWriter.startDirective for why it cannot become a section.
         return Line.SectionHeader(label, sectionKind(label))
     }
 

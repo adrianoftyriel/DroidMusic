@@ -102,11 +102,38 @@ object ChordsOverLyricsParser {
      * ASCII tablature: a string label and a run of dashes. Checked before chord
      * detection because a tab line like `E|-----------|` would otherwise look
      * like the chord E followed by bar furniture.
+     *
+     * Two rules, because tablature comes in two shapes. The reliable one is a
+     * line that names its string and then contains nothing but tab characters -
+     * `A|-9-9-5-5-|` - which is what almost all tab looks like. The looser
+     * dash-counting rule is kept for tab that does not label its strings.
+     *
+     * The looser rule alone used to be the whole test, and it was wrong in a way
+     * that only showed on real files: it demanded a run of four or more dashes
+     * and bars, which an empty string like `e|--------|` has and a busy one like
+     * `A|-9-9-5-5-5-5-5-5-|` never does. A chart's open strings were recognised
+     * as tablature and the string carrying the actual riff was not.
      */
     fun isTabLine(line: String): Boolean {
+        val trimmed = line.trim()
+        val labelled = TAB_LABEL.matchEntire(trimmed)
+        if (labelled != null) {
+            val body = labelled.groupValues[2]
+            if (body.count { it == '-' } >= 3 && body.all { it in TAB_BODY_CHARS }) return true
+        }
         val dashes = line.count { it == '-' }
         return dashes >= 4 && dashes >= line.length / 4 && line.contains(Regex("[-|]{4,}"))
     }
+
+    /** A string name and the bar that follows it: `e|`, `E |`, `Eb|`, `F#|`. */
+    private val TAB_LABEL = Regex("^([A-Ga-g][#b♯♭]?)\\s*\\|(.*)$")
+
+    /**
+     * What may appear in a tab line after the string label: fret numbers, the
+     * fretboard itself, and the technique notation that goes with it - hammer-on,
+     * pull-off, bend, release, slide, vibrato, tap, harmonic, mute.
+     */
+    private const val TAB_BODY_CHARS = "-|0123456789 hpbrsvtxX/\\~^()<>*.,:="
 
     private fun isSectionHeader(line: String): Boolean {
         val t = line.trim()

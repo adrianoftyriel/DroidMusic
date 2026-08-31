@@ -98,6 +98,10 @@ fun main(args: Array<String>) {
             }}")
             is Line.Comment -> println("  {${line.text}}")
             is Line.Tab -> println("  ${line.text}")
+            is Line.Grid -> println("  ${line.plainText}")
+            is Line.ChorusRecall -> println("  {chorus${line.label?.let { ": $it" } ?: ""}}")
+            is Line.Break -> println("  --- ${line.kind} break ---")
+            is Line.SectionEnd -> Unit
             Line.Blank -> println()
         }
     }

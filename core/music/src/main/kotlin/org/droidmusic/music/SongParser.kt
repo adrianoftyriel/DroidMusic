@@ -23,118 +23,58 @@ object SongParser {
     /**
      * ChordPro is identified by its own syntax rather than by file extension,
      * because plenty of ChordPro lives in files called `.txt`.
+     *
+     * A recognised directive is proof on its own - no other format uses braces
+     * on a line of their own. An inline bracket is weaker evidence, since a
+     * chords-over-lyrics chart may have `[Chorus]` as a section heading, so a
+     * bracket only counts when it holds something that is actually a chord or an
+     * explicit `[*annotation]`.
      */
     fun detectFormat(text: String): ChartFormat {
-        val head = text.lineSequence().take(400).toList()
-        val directive = head.any { DIRECTIVE.matches(it.trim()) }
-        val inlineChord = head.any { INLINE_CHORD.containsMatchIn(it) }
-        if (directive || inlineChord) return ChartFormat.CHORDPRO
+        val head = ChordProLex.logicalLines(text).take(400)
+
+        for (line in head) {
+            val body = ChordProLex.directiveBody(line) ?: continue
+            val name = ChordProLex.directive(body).name
+            if (name.isEmpty()) continue
+            if (name in ChordProLex.KNOWN_DIRECTIVES ||
+                name.startsWith("start_of_") || name.startsWith("end_of_") ||
+                name.startsWith("x_")
+            ) {
+                return ChartFormat.CHORDPRO
+            }
+        }
+
+        if (head.any { hasInlineChord(it) }) return ChartFormat.CHORDPRO
+
         val chordLines = head.count { ChordsOverLyricsParser.isChordLine(it) }
         return if (chordLines >= 1) ChartFormat.CHORDS_OVER_LYRICS else ChartFormat.PLAIN_TEXT
     }
 
-    internal val DIRECTIVE = Regex("^\\{\\s*([a-zA-Z_]+)\\s*(?::\\s*(.*?))?\\s*}$")
-    internal val INLINE_CHORD = Regex("\\[[A-G][^\\]]{0,12}]")
-}
-
-object ChordProParser {
-
-    fun parse(text: String): Song {
-        var meta = SongMeta(format = ChartFormat.CHORDPRO)
-        val extra = mutableMapOf<String, String>()
-        val lines = mutableListOf<Line>()
-        var inTab = false
-
-        for (raw in text.lines()) {
-            val trimmed = raw.trim()
-            val directive = SongParser.DIRECTIVE.matchEntire(trimmed)
-
-            if (directive != null) {
-                val name = directive.groupValues[1].lowercase()
-                val value = directive.groupValues[2].trim()
-                when (name) {
-                    "title", "t" -> meta = meta.copy(title = value)
-                    "subtitle", "st" -> meta = meta.copy(subtitle = value)
-                    "artist", "composer" -> meta = meta.copy(artist = value)
-                    "key" -> Key.parse(value)?.let { meta = meta.copy(key = it) }
-                    "capo" -> value.toIntOrNull()?.let { meta = meta.copy(capo = it) }
-                    "tempo", "bpm" -> value.toIntOrNull()?.let { meta = meta.copy(tempo = it) }
-                    "time", "meter" -> meta = meta.copy(time = value)
-                    "comment", "c", "comment_italic", "ci", "comment_box", "cb" ->
-                        lines += Line.Comment(value)
-                    "start_of_tab", "sot" -> {
-                        inTab = true
-                        lines += Line.SectionHeader(value.ifEmpty { "Tab" }, SectionKind.TAB)
-                    }
-                    "end_of_tab", "eot" -> inTab = false
-                    "start_of_chorus", "soc" ->
-                        lines += Line.SectionHeader(value.ifEmpty { "Chorus" }, SectionKind.CHORUS)
-                    "start_of_verse", "sov" ->
-                        lines += Line.SectionHeader(value.ifEmpty { "Verse" }, SectionKind.VERSE)
-                    "start_of_bridge", "sob" ->
-                        lines += Line.SectionHeader(value.ifEmpty { "Bridge" }, SectionKind.BRIDGE)
-                    "start_of_grid", "sog" ->
-                        lines += Line.SectionHeader(value.ifEmpty { "Grid" }, SectionKind.GRID)
-                    "end_of_chorus", "eoc", "end_of_verse", "eov",
-                    "end_of_bridge", "eob", "end_of_grid", "eog",
-                    -> Unit
-                    else -> if (value.isNotEmpty()) extra[name] = value
-                }
-                continue
-            }
-
-            when {
-                inTab -> lines += Line.Tab(raw)
-                raw.isBlank() -> lines += Line.Blank
-                else -> lines += Line.Lyric(parseInline(raw))
-            }
-        }
-
-        return Song(meta.copy(extra = extra), lines)
-    }
-
     /**
-     * Splits a ChordPro line into segments at each `[...]`.
+     * Whether a line carries a bracket that means what ChordPro means by one.
      *
-     * Bracket contents that do not parse as a chord are kept as literal text
-     * rather than dropped. Charts use brackets for annotations - `[x2]`,
-     * `[slowly]` - and silently deleting them would be worse than showing them.
+     * The bracket has to hold a real chord, or be an explicit annotation. A
+     * heading like `[Chorus]` on its own line does not count - reading that as
+     * ChordPro is how a whole chart's chords get lost, because the chords in a
+     * chords-over-lyrics file are on the line *above* the words and the ChordPro
+     * parser would find none of them.
      */
-    internal fun parseInline(raw: String): List<Segment> {
-        val segments = mutableListOf<Segment>()
-        val current = StringBuilder()
-        var pendingChord: Chord? = null
+    private fun hasInlineChord(line: String): Boolean {
         var i = 0
-
-        while (i < raw.length) {
-            val c = raw[i]
-            if (c == '[') {
-                val close = raw.indexOf(']', i + 1)
-                if (close > 0) {
-                    val inner = raw.substring(i + 1, close)
-                    val chord = Chord.parse(inner)
-                    if (chord != null) {
-                        segments += Segment(pendingChord, current.toString())
-                        current.setLength(0)
-                        pendingChord = chord
-                    } else {
-                        current.append('[').append(inner).append(']')
-                    }
+        while (i < line.length) {
+            if (line[i] == '[') {
+                val close = line.indexOf(']', i + 1)
+                if (close > i) {
+                    val inner = line.substring(i + 1, close)
+                    if (inner.startsWith("*")) return true
+                    if (Chord.parse(inner.removeSurrounding("(", ")")) != null) return true
                     i = close + 1
                     continue
                 }
             }
-            current.append(c)
             i++
         }
-        segments += Segment(pendingChord, current.toString())
-
-        // A leading empty segment carries no information; drop it so a line that
-        // starts on a chord does not render with a phantom gap in front of it.
-        return if (segments.size > 1 && segments[0].chord == null && segments[0].text.isEmpty()) {
-            segments.drop(1)
-        } else {
-            segments
-        }
+        return false
     }
 }

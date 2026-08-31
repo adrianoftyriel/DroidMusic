@@ -199,7 +199,7 @@ class UltimateGuitarTest {
         assertEquals("Test Song", song.meta.title)
         assertEquals("The Testers", song.meta.artist)
         assertEquals(2, song.meta.capo)
-        assertEquals(SOURCE_URL, song.meta.extra["source"])
+        assertEquals(SOURCE_URL, song.meta.first("source"))
         assertEquals(
             listOf("G", "D", "Am", "C", "G", "D", "Am", "C", "C", "G", "D", "G", "D"),
             song.chords().map { it.toString() },
