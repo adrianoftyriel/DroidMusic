@@ -4,7 +4,10 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -252,172 +255,198 @@ fun DroidMusicRoot(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
         ) {
-            when (val screen = currentScreen) {
-                Screen.Library -> {
-                    LibraryScreen(
-                        controller = libraryController,
-                        onOpenSong = { song ->
+            // The window is edge to edge, which is what lets a chart use the
+            // whole screen - and it means the system bars are drawn *over* this
+            // app rather than beside it. Nothing outside the viewer wants that:
+            // the header of every other screen was sitting underneath the status
+            // bar, or under the taskbar on a tablet, where it cannot be read or
+            // tapped.
+            //
+            // So the padding is applied here, once, rather than in each of the
+            // seven screens - there is nothing screen-specific about it, and one
+            // screen added later without it is exactly how this came back.
+            //
+            // The viewer is deliberately exempt. It hides the bars while a chart
+            // is open and wants every pixel; its controls take the insets
+            // themselves, below, because showing them brings the bars back.
+            val insets = if (inViewer) {
+                Modifier
+            } else {
+                Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+            }
+
+            Box(Modifier.fillMaxSize().then(insets)) {
+                when (val screen = currentScreen) {
+                    Screen.Library -> {
+                        LibraryScreen(
+                            controller = libraryController,
+                            onOpenSong = { song ->
+                                viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
+                                navigator.go(Screen.Viewer(song.id))
+                            },
+                            onAddSongToSetlist = { filingSong = it },
+                            onOpenSetlists = { navigator.go(Screen.Setlists) },
+                            onOpenSession = { navigator.go(Screen.Session) },
+                            onOpenSettings = { navigator.go(Screen.Settings) },
+                            onScan = { navigator.go(Screen.Capture) },
+                        )
+
+                        val filing = filingSong
+                        if (filing != null) {
+                            AddToSetlistDialog(
+                                song = filing,
+                                controller = setlistController,
+                                onDismiss = { filingSong = null },
+                                // A toast rather than a trip to the set list. The
+                                // player is filing twenty songs in a row and wants
+                                // to stay where they are; what they need to know is
+                                // that it landed, and which list it landed in.
+                                onAdded = { setlist ->
+                                    Toast.makeText(
+                                        context,
+                                        "Added \"${filing.bestTitle}\" to ${setlist.name}",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                },
+                            )
+                        }
+                    }
+
+                    Screen.Setlists -> SetlistsScreen(
+                        controller = setlistController,
+                        onBack = { navigator.back() },
+                        onOpen = { navigator.go(Screen.SetlistDetail(it.id)) },
+                    )
+
+                    is Screen.SetlistDetail -> {
+                        val book by setlistController.book.collectAsState()
+                        val setlist = book.setlists.firstOrNull { it.id == screen.setlistId }
+                        if (setlist == null) {
+                            LaunchedEffect(Unit) { navigator.back() }
+                        } else {
+                            val index by app.library.index.collectAsState()
+                            SetlistDetailScreen(
+                                setlist = setlist,
+                                controller = setlistController,
+                                songFor = { id -> index.findById(id) },
+                                onBack = { navigator.back() },
+                                onPlay = { position ->
+                                    val entry = setlist.entries.getOrNull(position) ?: return@SetlistDetailScreen
+                                    viewerController.open(
+                                        entry.songId,
+                                        setlist,
+                                        position,
+                                        settings.viewer.unicodeAccidentals,
+                                    )
+                                    // The leader shares the running order as soon as
+                                    // they start it, so nobody has to be sent a file
+                                    // in the ninety seconds before the first song.
+                                    if (sessionRole == SessionRole.LEADER) {
+                                        sessionCoordinator.pushSetlist(setlist)
+                                    }
+                                    navigator.go(Screen.Viewer(entry.songId, setlist.id, position))
+                                },
+                                onAddSongs = { navigator.go(Screen.Library) },
+                            )
+                        }
+                    }
+
+                    Screen.Session -> SessionScreen(
+                        coordinator = sessionCoordinator,
+                        deviceName = settings.deviceName.ifEmpty { "This device" },
+                        onBack = { navigator.back() },
+                    )
+
+                    Screen.Settings -> SettingsScreen(
+                        settings = settings,
+                        onChange = { transform -> app.settings.updateAsync(transform) },
+                        onOpenFootSwitchSetup = { navigator.go(Screen.FootSwitchSetup) },
+                        onOpenUpdates = { navigator.go(Screen.Updates) },
+                        onBack = { navigator.back() },
+                        versionName = DroidMusicApp.VERSION,
+                        releaseTag = updateController.currentTag,
+                    )
+
+                    Screen.Capture -> CaptureScreen(
+                        controller = captureController,
+                        onBack = { navigator.back() },
+                        onOpenSaved = { song ->
+                            // Straight into the viewer. The player photographed it to
+                            // read it, and making them find it in the library again
+                            // is a step for no reason.
                             viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
-                            navigator.go(Screen.Viewer(song.id))
+                            navigator.replace(Screen.Viewer(song.id))
                         },
-                        onAddSongToSetlist = { filingSong = it },
-                        onOpenSetlists = { navigator.go(Screen.Setlists) },
-                        onOpenSession = { navigator.go(Screen.Session) },
-                        onOpenSettings = { navigator.go(Screen.Settings) },
-                        onScan = { navigator.go(Screen.Capture) },
                     )
 
-                    val filing = filingSong
-                    if (filing != null) {
-                        AddToSetlistDialog(
-                            song = filing,
-                            controller = setlistController,
-                            onDismiss = { filingSong = null },
-                            // A toast rather than a trip to the set list. The
-                            // player is filing twenty songs in a row and wants
-                            // to stay where they are; what they need to know is
-                            // that it landed, and which list it landed in.
-                            onAdded = { setlist ->
-                                Toast.makeText(
-                                    context,
-                                    "Added \"${filing.bestTitle}\" to ${setlist.name}",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            },
-                        )
-                    }
-                }
-
-                Screen.Setlists -> SetlistsScreen(
-                    controller = setlistController,
-                    onBack = { navigator.back() },
-                    onOpen = { navigator.go(Screen.SetlistDetail(it.id)) },
-                )
-
-                is Screen.SetlistDetail -> {
-                    val book by setlistController.book.collectAsState()
-                    val setlist = book.setlists.firstOrNull { it.id == screen.setlistId }
-                    if (setlist == null) {
-                        LaunchedEffect(Unit) { navigator.back() }
-                    } else {
-                        val index by app.library.index.collectAsState()
-                        SetlistDetailScreen(
-                            setlist = setlist,
-                            controller = setlistController,
-                            songFor = { id -> index.findById(id) },
-                            onBack = { navigator.back() },
-                            onPlay = { position ->
-                                val entry = setlist.entries.getOrNull(position) ?: return@SetlistDetailScreen
-                                viewerController.open(
-                                    entry.songId,
-                                    setlist,
-                                    position,
-                                    settings.viewer.unicodeAccidentals,
-                                )
-                                // The leader shares the running order as soon as
-                                // they start it, so nobody has to be sent a file
-                                // in the ninety seconds before the first song.
-                                if (sessionRole == SessionRole.LEADER) {
-                                    sessionCoordinator.pushSetlist(setlist)
-                                }
-                                navigator.go(Screen.Viewer(entry.songId, setlist.id, position))
-                            },
-                            onAddSongs = { navigator.go(Screen.Library) },
-                        )
-                    }
-                }
-
-                Screen.Session -> SessionScreen(
-                    coordinator = sessionCoordinator,
-                    deviceName = settings.deviceName.ifEmpty { "This device" },
-                    onBack = { navigator.back() },
-                )
-
-                Screen.Settings -> SettingsScreen(
-                    settings = settings,
-                    onChange = { transform -> app.settings.updateAsync(transform) },
-                    onOpenFootSwitchSetup = { navigator.go(Screen.FootSwitchSetup) },
-                    onOpenUpdates = { navigator.go(Screen.Updates) },
-                    onBack = { navigator.back() },
-                    versionName = DroidMusicApp.VERSION,
-                    releaseTag = updateController.currentTag,
-                )
-
-                Screen.Capture -> CaptureScreen(
-                    controller = captureController,
-                    onBack = { navigator.back() },
-                    onOpenSaved = { song ->
-                        // Straight into the viewer. The player photographed it to
-                        // read it, and making them find it in the library again
-                        // is a step for no reason.
-                        viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
-                        navigator.replace(Screen.Viewer(song.id))
-                    },
-                )
-
-                Screen.Updates -> UpdatesScreen(
-                    controller = updateController,
-                    channel = settings.updateChannel,
-                    onChannelChange = { channel ->
-                        app.settings.updateAsync { it.copy(updateChannel = channel) }
-                    },
-                    onBack = { navigator.back() },
-                    versionName = DroidMusicApp.VERSION,
-                )
-
-                Screen.FootSwitchSetup -> FootSwitchSetupScreen(
-                    settings = settings,
-                    pedalEvents = pedalActions,
-                    rawKeys = rawKeys,
-                    onChange = { transform -> app.settings.updateAsync(transform) },
-                    onBack = { navigator.back() },
-                )
-
-                is Screen.Viewer -> Box(Modifier.fillMaxSize()) {
-                    ViewerSurface(
-                        controller = viewerController,
-                        preferences = settings.viewer,
-                        onToggleControls = { controlsVisible = !controlsVisible },
+                    Screen.Updates -> UpdatesScreen(
+                        controller = updateController,
+                        channel = settings.updateChannel,
+                        onChannelChange = { channel ->
+                            app.settings.updateAsync { it.copy(updateChannel = channel) }
+                        },
+                        onBack = { navigator.back() },
+                        versionName = DroidMusicApp.VERSION,
                     )
 
-                    AnimatedVisibility(
-                        visible = controlsVisible,
-                        modifier = Modifier.align(Alignment.TopCenter),
-                    ) {
-                        ViewerControls(
+                    Screen.FootSwitchSetup -> FootSwitchSetupScreen(
+                        settings = settings,
+                        pedalEvents = pedalActions,
+                        rawKeys = rawKeys,
+                        onChange = { transform -> app.settings.updateAsync(transform) },
+                        onBack = { navigator.back() },
+                    )
+
+                    is Screen.Viewer -> Box(Modifier.fillMaxSize()) {
+                        ViewerSurface(
                             controller = viewerController,
-                            sessionStatus = sessionStatus,
-                            canRejoin = followerState?.canRejoin == true,
-                            onRejoin = { sessionCoordinator.rejoin() },
-                            onOpenSetlist = {
-                                controlsVisible = false
-                                navigator.go(Screen.Setlists)
-                            },
-                            onOpenSession = {
-                                controlsVisible = false
-                                navigator.go(Screen.Session)
-                            },
-                            onOpenSettings = {
-                                controlsVisible = false
-                                navigator.go(Screen.Settings)
-                            },
-                            onClose = { controlsVisible = false },
-                            onBack = {
-                                controlsVisible = false
-                                navigator.backToRoot()
-                            },
-                            unicodeAccidentals = settings.viewer.unicodeAccidentals,
+                            preferences = settings.viewer,
+                            onToggleControls = { controlsVisible = !controlsVisible },
                         )
-                    }
 
-                    // A permanent, quiet reminder of who is driving. Always
-                    // visible, because a player who cannot tell whether their own
-                    // page turns will stick has no way to trust the app.
-                    if (sessionStatus != null && !controlsVisible) {
-                        org.droidmusic.app.ui.viewer.ViewerStatusStrip(
-                            text = sessionStatus,
-                            modifier = Modifier.align(Alignment.BottomCenter),
-                        )
+                        AnimatedVisibility(
+                            visible = controlsVisible,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .windowInsetsPadding(WindowInsets.safeDrawing),
+                        ) {
+                            ViewerControls(
+                                controller = viewerController,
+                                sessionStatus = sessionStatus,
+                                canRejoin = followerState?.canRejoin == true,
+                                onRejoin = { sessionCoordinator.rejoin() },
+                                onOpenSetlist = {
+                                    controlsVisible = false
+                                    navigator.go(Screen.Setlists)
+                                },
+                                onOpenSession = {
+                                    controlsVisible = false
+                                    navigator.go(Screen.Session)
+                                },
+                                onOpenSettings = {
+                                    controlsVisible = false
+                                    navigator.go(Screen.Settings)
+                                },
+                                onClose = { controlsVisible = false },
+                                onBack = {
+                                    controlsVisible = false
+                                    navigator.backToRoot()
+                                },
+                                unicodeAccidentals = settings.viewer.unicodeAccidentals,
+                            )
+                        }
+
+                        // A permanent, quiet reminder of who is driving. Always
+                        // visible, because a player who cannot tell whether their own
+                        // page turns will stick has no way to trust the app.
+                        if (sessionStatus != null && !controlsVisible) {
+                            org.droidmusic.app.ui.viewer.ViewerStatusStrip(
+                                text = sessionStatus,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .windowInsetsPadding(WindowInsets.safeDrawing),
+                            )
+                        }
                     }
                 }
             }
