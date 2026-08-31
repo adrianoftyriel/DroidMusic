@@ -37,10 +37,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -609,8 +609,9 @@ private fun SongRow(
     // call - and neither the composition nor a library of four hundred rows
     // should be waiting on that. Until the answer arrives the item is absent,
     // which is also what it will be for most charts.
-    val canDelete by produceState(initialValue = false, menuOpen) {
-        value = menuOpen && withContext(Dispatchers.IO) { canDeleteFile() }
+    var canDelete by remember { mutableStateOf(false) }
+    LaunchedEffect(menuOpen) {
+        canDelete = menuOpen && withContext(Dispatchers.IO) { canDeleteFile() }
     }
 
     Box {
