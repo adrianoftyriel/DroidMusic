@@ -88,10 +88,14 @@ class LibraryController(
             // needs to know which one is missing, and a number does not say.
             val skipped = mutableListOf<String>()
 
+            // Files whose grant will not outlive this share, kept by copying.
+            val copies = mutableListOf<SongRef>()
+
             for ((_, picked) in uris.groupBy { DocumentSources.pickedFilesLabel(it.authority) }) {
-                val source = fileSourceFor(picked.first().authority)
-                val added = picked.mapNotNull { uri ->
-                    DocumentSources.persistPermission(context, uri)
+                val referenced = mutableListOf<Referenced>()
+
+                for (uri in picked) {
+                    val persisted = DocumentSources.persistPermission(context, uri)
                     val name = displayName(uri) ?: uri.lastPathSegment ?: "that file"
                     val kind = DocumentSources.kindOfPickedFile(
                         resolver = context.contentResolver,
@@ -101,14 +105,55 @@ class LibraryController(
                     )
                     if (kind == FileKind.UNKNOWN) {
                         skipped += name
-                        return@mapNotNull null
+                        continue
                     }
+
+                    // A chart shared in from another app carries a permission
+                    // that lasts for that share and no longer. Keeping the URI
+                    // and hoping produced a library row that opened once and
+                    // then said the file could not be read - which is nothing
+                    // anybody can act on, and which is discovered at the stand
+                    // rather than at the moment of adding.
+                    //
+                    // So where Android will not make the grant last, the bytes
+                    // are copied instead. It costs the size of a chart and the
+                    // file opens for good. Anything the grant does cover stays
+                    // referenced where it lies, because a duplicate of
+                    // somebody's Drive folder is not what they asked for.
+                    if (persisted) {
+                        referenced += Referenced(uri, name, kind)
+                        continue
+                    }
+
+                    val copied = DocumentSources.copyIntoManagedStorage(
+                        context,
+                        SongRef(
+                            id = DocumentSources.stableId(
+                                DocumentSources.MANAGED_SOURCE_ID,
+                                uri.toString(),
+                            ),
+                            sourceId = DocumentSources.MANAGED_SOURCE_ID,
+                            uri = uri.toString(),
+                            displayName = name,
+                            kind = kind,
+                        ),
+                        DocumentSources.MANAGED_SOURCE_ID,
+                    )
+                    if (copied != null) copies += copied else skipped += name
+                }
+
+                // Made only once something is going to point at it, so that a
+                // share whose files all had to be copied does not leave an empty
+                // row in the folder list.
+                if (referenced.isEmpty()) continue
+                val source = fileSourceFor(picked.first().authority)
+                val added = referenced.map {
                     SongRef(
-                        id = DocumentSources.stableId(source.id, uri.toString()),
+                        id = DocumentSources.stableId(source.id, it.uri.toString()),
                         sourceId = source.id,
-                        uri = uri.toString(),
-                        displayName = name,
-                        kind = kind,
+                        uri = it.uri.toString(),
+                        displayName = it.name,
+                        kind = it.kind,
                     )
                 }
 
@@ -120,6 +165,16 @@ class LibraryController(
                     settings.settings.value.indexChartContents,
                 )
                 repository.replaceSongsFrom(source.id, enriched, System.currentTimeMillis())
+            }
+
+            if (copies.isNotEmpty()) {
+                fileManaged(
+                    DocumentSources.enrich(
+                        context,
+                        copies,
+                        settings.settings.value.indexChartContents,
+                    ),
+                )
             }
 
             scanning = false
@@ -207,7 +262,7 @@ class LibraryController(
                 (reason?.let { ": $it" } ?: ".")
         }
 
-        file(song)
+        fileManaged(listOf(song))
         imported = song
         return null
     }
@@ -262,14 +317,16 @@ class LibraryController(
         ChartAnalyzer.analyze(SongParser.parse(chordPro)).effectiveKey?.toString()
     }.getOrNull()
 
-    /** Adds the written chart to the index, making the managed source if needed. */
-    private suspend fun file(song: SongRef) {
+    /** Adds charts to the managed source, making that source if it is not there. */
+    private suspend fun fileManaged(songs: List<SongRef>) {
+        if (songs.isEmpty()) return
         val source = DocumentSources.managedSource()
         if (index.value.sources.none { it.id == source.id }) {
             repository.addSource(source)
         }
-        val existing = index.value.songsFrom(source.id).filterNot { it.id == song.id }
-        repository.replaceSongsFrom(source.id, existing + song, System.currentTimeMillis())
+        val incoming = songs.map { it.id }.toSet()
+        val existing = index.value.songsFrom(source.id).filterNot { it.id in incoming }
+        repository.replaceSongsFrom(source.id, existing + songs, System.currentTimeMillis())
     }
 
     /**
@@ -445,6 +502,9 @@ class LibraryController(
         }
         return filtered.sortedBy { it.bestTitle.lowercase() }
     }
+
+    /** A picked file that is staying where it is, once it is known to be readable. */
+    private data class Referenced(val uri: Uri, val name: String, val kind: FileKind)
 
     private companion object {
         const val MANAGED_DIRECTORY = "managed"

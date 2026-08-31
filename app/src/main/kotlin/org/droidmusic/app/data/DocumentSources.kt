@@ -168,6 +168,55 @@ object DocumentSources {
         }
     }
 
+    /**
+     * Why a chart would not open, asked only once one already has not.
+     *
+     * The viewer used to offer one explanation for every failure - that the file
+     * might be in a cloud folder and need to be available offline. That is a
+     * real cause and it is not the commonest one, and the others each have a
+     * different thing to do about them: a grant Android is no longer honouring
+     * wants the file adding again, a file that has moved wants finding, and a
+     * file that reads perfectly well but is not a chart wants neither. One
+     * message covering all of them tells somebody standing at a music stand to
+     * go and check a setting that was never the problem.
+     *
+     * The probe is one byte. This runs only on a failure, so the cost is paid
+     * once, by somebody who is already stuck.
+     */
+    suspend fun describeOpenFailure(
+        resolver: ContentResolver,
+        song: SongRef,
+    ): String = withContext(Dispatchers.IO) {
+        val probe = runCatching {
+            resolver.openInputStream(Uri.parse(song.uri))?.use { it.read() }
+        }
+
+        when (val failure = probe.exceptionOrNull()) {
+            is SecurityException ->
+                "Android is no longer letting DroidMusic read it. This happens to a " +
+                    "file shared into the app from somewhere else, because the " +
+                    "permission that came with it only lasted for that share. Add the " +
+                    "file, or the folder it sits in, again."
+
+            is java.io.FileNotFoundException ->
+                "It is not where it was when it was added. If it was moved, renamed or " +
+                    "deleted, add it again from wherever it lives now."
+
+            null -> if (probe.getOrNull() == null) {
+                "The app that provides it would not hand it over. If it lives in a " +
+                    "cloud folder, it may need to be made available offline."
+            } else {
+                // The bytes are there and were readable, so nothing about storage
+                // or permissions is wrong: this file defeated the chart reader.
+                "The file was read but could not be laid out as a chart. If it is a " +
+                    "PDF or an image, it may be damaged."
+            }
+
+            else -> "It could not be read: ${failure.message ?: "the file would not open"}. " +
+                "If it lives in a cloud folder, it may need to be made available offline."
+        }
+    }
+
     /** Whether a previously granted source is still readable. */
     fun hasPermission(context: Context, uri: Uri): Boolean =
         context.contentResolver.persistedUriPermissions.any {

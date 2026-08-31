@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.render.ChartPageSource
 import org.droidmusic.app.render.PageSource
@@ -133,8 +134,12 @@ class ViewerController(
             val opened = PageSources.open(context, ref, unicodeAccidentals)
             if (opened == null) {
                 loading = false
+                // Asked rather than assumed. A grant Android has stopped
+                // honouring, a file that has moved and a cloud file that was
+                // never fetched all failed here identically before, and only
+                // one of the three was ever named.
                 error = "Could not open ${ref.displayName}. " +
-                    "If it lives in a cloud folder, it may need to be available offline."
+                    DocumentSources.describeOpenFailure(context.contentResolver, ref)
                 return@launch
             }
 
