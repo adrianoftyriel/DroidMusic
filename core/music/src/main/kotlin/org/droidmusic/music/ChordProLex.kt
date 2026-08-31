@@ -224,11 +224,15 @@ internal object ChordProLex {
         return raw.replace("\\n", "\n").ifEmpty { null }
     }
 
-    private val DIRECTIVE_LINE = Regex("^\\s*\\{(.*)}\\s*$")
+    // Braces are escaped, always. Android's regex engine is ICU and rejects a
+    // bare `}` outright, where OpenJDK reads it as the literal character - so an
+    // unescaped one compiles in every test here and throws on every phone. See
+    // AndroidRegexTest, which fails the build rather than letting it happen twice.
+    private val DIRECTIVE_LINE = Regex("^\\s*\\{(.*)\\}\\s*$")
     private val SURROGATE_PAIR =
         Regex("\\\\u(d[89ab][0-9a-f]{2})\\\\u(d[cdef][0-9a-f]{2})", RegexOption.IGNORE_CASE)
     private val SHORT_ESCAPE = Regex("\\\\u([0-9a-f]{4})", RegexOption.IGNORE_CASE)
-    private val BRACED_ESCAPE = Regex("\\\\u\\{([0-9a-f]+)}", RegexOption.IGNORE_CASE)
+    private val BRACED_ESCAPE = Regex("\\\\u\\{([0-9a-f]+)\\}", RegexOption.IGNORE_CASE)
     private val ATTRIBUTE = Regex("([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')")
 
     /** Environment names may hold letters, digits and underscores, and nothing else. */

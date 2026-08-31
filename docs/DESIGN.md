@@ -24,7 +24,7 @@ Silent failures need tests, and tests need to be cheap enough that they are run
 constantly. Splitting the core out means:
 
 ```sh
-./gradlew -PcoreOnly coreTests      # 154 tests, no Android SDK, seconds
+./gradlew -PcoreOnly coreTests      # 260 tests, no Android SDK, seconds
 ```
 
 which runs on any machine with a JDK, gates the APK build in CI, and gives a
@@ -34,6 +34,30 @@ The `-PcoreOnly` flag is opt-in rather than auto-detected from whether an SDK is
 present. Auto-detection was tempting and is a trap: a CI run that quietly skips
 the app module because it could not find an SDK is far worse than one that fails
 with a message telling you to install it.
+
+### What the split cannot catch
+
+The core tests run on OpenJDK. The app runs on Android. Where the two disagree,
+a green suite proves nothing — and they do disagree about regular expressions,
+because Android's `java.util.regex` is backed by ICU and OpenJDK's is not.
+
+The one that has actually bitten is the brace. OpenJDK reads a lone `}` as the
+literal character; ICU rejects the whole pattern. A `Regex` held in an `object`
+is compiled the first time that class is touched, so the failure surfaces as an
+`ExceptionInInitializerError` and then a `NoClassDefFoundError` on every later
+reference — which presents to the user as *every* ChordPro file failing to open,
+from a parser whose entire suite passes.
+
+`AndroidRegexTest` reads the source of every module, `app` included, and fails on
+any regex holding a brace that is neither escaped nor part of a `{n,m}`
+quantifier. It is a strange-looking test — a test that greps its own repository —
+and it exists because this is a class of bug the fast suite is structurally
+unable to see. The rule it enforces: in a regular expression, escape braces.
+
+The general lesson is worth stating plainly, because the next divergence will not
+be about braces: **the core suite tests logic, not the platform.** Anything that
+depends on a platform library's behaviour rather than on arithmetic has to be
+checked on a device or guarded some other way.
 
 ---
 

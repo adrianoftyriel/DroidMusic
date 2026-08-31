@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 154 tests that run on a plain JVM; the
+band-sync and update layers are covered by 260 tests that run on a plain JVM; the
 app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
