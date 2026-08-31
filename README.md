@@ -359,6 +359,44 @@ Requires JDK 17. `-PcoreOnly` leaves the Android module out of the build
 entirely, so the music theory, set list, sync and update suites run on any
 machine.
 
+### Working on it with an AI agent
+
+`.claude/settings.json` registers a `PreToolUse` hook that routes shell commands
+through [RTK](https://github.com/rtk-ai/rtk), which strips the parts of a
+command's output that nothing downstream reads - Gradle's task list, its daemon
+chatter, the progress bars - and keeps the parts that carry the result.
+
+```sh
+brew install rtk    # or: cargo install --git https://github.com/rtk-ai/rtk
+```
+
+Installing it is optional and there is nothing to configure. The hook checks for
+the binary and exits silently when it is absent, so a checkout on a machine
+without RTK behaves exactly as it did before - no rewritten commands, no
+warnings, and nothing in the build that depends on it either way.
+
+Measured on this repository, `./gradlew -PcoreOnly coreTests` goes from 2,955
+bytes of output to 59 when everything is up to date, and from 6,129 to 57 when
+every suite actually runs. A failing suite goes from 4,232 to 344 and still names
+the failing test, the pass count and the HTML report. `grep` across the Kotlin
+sources roughly halves.
+
+**One gap worth knowing about.** RTK picks its filter from the Gradle task name,
+so anything ending in `test` gets the test-output filter - and that filter keeps
+failing test names but not `e:` compiler errors. A *compile* error during
+`coreTests` therefore arrives as `BUILD FAILED` and nothing else, which is
+precisely the failure the CI job goes to such lengths to keep visible. RTK does
+print the path of the unfiltered log it tee'd, so the error is one `cat` away,
+and running the compile task on its own reports it in full:
+
+```sh
+./gradlew -PcoreOnly :core:music:compileKotlin   # passes through unfiltered
+rtk proxy ./gradlew -PcoreOnly coreTests         # any command, unfiltered
+```
+
+`--stacktrace`, `--info` and `--debug` also disable filtering entirely, so
+reaching for them still gets the whole log.
+
 ### Releases
 
 Every push builds and uploads an APK; a push to `dev` publishes a pre-release

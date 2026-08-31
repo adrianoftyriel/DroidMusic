@@ -14,3 +14,7 @@ captures/
 *.keystore
 *.jks
 dist/
+
+# Per-machine Claude Code overrides. The committed .claude/settings.json is
+# shared; this one is not.
+.claude/settings.local.json
