@@ -5,19 +5,26 @@ import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.data.SettingsRepository
+import org.droidmusic.app.data.WebChart
 import org.droidmusic.library.FileKind
 import org.droidmusic.library.LibraryIndex
 import org.droidmusic.library.SongRef
 import org.droidmusic.library.SourceKind
 import org.droidmusic.library.SourceRef
+import org.droidmusic.library.UltimateGuitar
 import org.droidmusic.library.normaliseForMatching
+import org.droidmusic.music.ChartAnalyzer
+import org.droidmusic.music.SongParser
 
 /** Drives adding, scanning and searching the library. */
 class LibraryController(
@@ -33,6 +40,16 @@ class LibraryController(
     var scanStatus by mutableStateOf("")
         private set
     var lastError by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * The chart the last link import produced, for the caller to open.
+     *
+     * Held rather than handed to a callback because the import is started by a
+     * share arriving from outside the app, which can happen while the library
+     * screen is not on screen to have been given one.
+     */
+    var imported by mutableStateOf<SongRef?>(null)
         private set
 
     fun addTree(treeUri: Uri) {
@@ -119,6 +136,120 @@ class LibraryController(
                 }
             }
         }
+    }
+
+    /**
+     * Imports a chart from a link somebody shared into the app.
+     *
+     * **What is stored is the chart, not the link.** The page is fetched once,
+     * converted, and written into the library as an ordinary ChordPro file. A
+     * bookmark would be less work and useless: charts are read on stage, where
+     * the wifi is somebody else's and there may be no signal at all, and a chart
+     * that has to be downloaded before it can be read is a chart that is not
+     * there when it is needed. Once this returns, the network is never involved
+     * in that song again.
+     *
+     * The file lands in managed storage rather than in one of the user's own
+     * folders, for the same reason a scan does: it is the app's file, nothing
+     * else put it there, and writing uninvited into somebody's Drive is not the
+     * app's business.
+     */
+    fun importFromShare(shared: String) {
+        // Not queued behind the scan, and not dropped either. Both write to the
+        // same progress line, and a share that vanishes without a word looks
+        // exactly like an app that ignored it.
+        if (scanning) {
+            lastError = "The library is busy. Share the link again in a moment."
+            return
+        }
+        scope.launch {
+            scanning = true
+            scanStatus = "Importing the chart"
+            lastError = null
+            try {
+                lastError = importChart(shared)
+            } finally {
+                scanning = false
+                scanStatus = ""
+            }
+        }
+    }
+
+    /** Runs the import, returning a message to show if it could not be done. */
+    private suspend fun importChart(shared: String): String? {
+        // A browser shares the page title and the address together, so the link
+        // is looked for inside what arrived rather than assumed to be all of it.
+        val url = UltimateGuitar.chartUrlIn(shared)
+            ?: return "DroidMusic imports chord charts from Ultimate Guitar links, " +
+                "and there is no Ultimate Guitar chart link in what was shared."
+
+        val html = when (val result = WebChart.fetch(url)) {
+            is WebChart.FetchResult.Ok -> result.html
+            is WebChart.FetchResult.Failed -> return result.message
+        }
+
+        val chart = UltimateGuitar.parsePage(html, url)
+            ?: return "There is no text chart on that page. Ultimate Guitar's official " +
+                "and Pro tabs are interactive players, and there is nothing in one to import."
+
+        val chordPro = UltimateGuitar.toChordPro(chart)
+        val song = withContext(Dispatchers.IO) {
+            runCatching { write(UltimateGuitar.fileNameFor(chart), chordPro) }.getOrNull()
+        } ?: return "The chart was read but could not be saved to this device."
+
+        file(song)
+        imported = song
+        return null
+    }
+
+    /** Writes the chart into managed storage and describes what was written. */
+    private fun write(fileName: String, chordPro: String): SongRef {
+        val directory = File(context.filesDir, MANAGED_DIRECTORY).apply { mkdirs() }
+        val target = File(directory, uniqueName(directory, fileName))
+        target.writeText(chordPro)
+
+        val parsed = SongParser.parse(chordPro)
+        return SongRef(
+            id = DocumentSources.stableId(DocumentSources.MANAGED_SOURCE_ID, target.name),
+            sourceId = DocumentSources.MANAGED_SOURCE_ID,
+            uri = Uri.fromFile(target).toString(),
+            displayName = target.name,
+            kind = FileKind.CHORDPRO,
+            sizeBytes = target.length(),
+            modifiedAt = target.lastModified(),
+            contentHash = DocumentSources.hashOf(chordPro.toByteArray()),
+            title = parsed.meta.title,
+            artist = parsed.meta.artist,
+            keyText = ChartAnalyzer.analyze(parsed).effectiveKey?.toString(),
+        )
+    }
+
+    /** Adds the written chart to the index, making the managed source if needed. */
+    private suspend fun file(song: SongRef) {
+        val source = DocumentSources.managedSource()
+        if (index.value.sources.none { it.id == source.id }) {
+            repository.addSource(source)
+        }
+        val existing = index.value.songsFrom(source.id).filterNot { it.id == song.id }
+        repository.replaceSongsFrom(source.id, existing + song, System.currentTimeMillis())
+    }
+
+    /**
+     * Never overwrites. Two imports of the same song are usually two different
+     * people's transcriptions of it, and which one a player wants is not a
+     * question this code can answer by throwing one away.
+     */
+    private fun uniqueName(directory: File, name: String): String {
+        if (!File(directory, name).exists()) return name
+        val stem = name.substringBeforeLast('.')
+        val extension = name.substringAfterLast('.', "chopro")
+        var suffix = 2
+        while (File(directory, "$stem ($suffix).$extension").exists()) suffix++
+        return "$stem ($suffix).$extension"
+    }
+
+    fun consumeImported() {
+        imported = null
     }
 
     /**
@@ -275,5 +406,9 @@ class LibraryController(
             }
         }
         return filtered.sortedBy { it.bestTitle.lowercase() }
+    }
+
+    private companion object {
+        const val MANAGED_DIRECTORY = "managed"
     }
 }

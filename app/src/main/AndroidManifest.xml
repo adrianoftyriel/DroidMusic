@@ -155,6 +155,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/json" />
                 <data android:mimeType="application/pdf" />
+                <!--
+                  Two quite different shares arrive as text, and the app wants
+                  both. One is a chart *file* shared as text/plain, which comes
+                  with its bytes in EXTRA_STREAM. The other is a chart *page*
+                  shared out of a browser, which has no file at all - only
+                  EXTRA_TEXT holding the page title and its address. The second
+                  is how a chart found on a phone gets into the library without
+                  anybody typing it out; see LibraryController.importFromShare.
+                -->
                 <data android:mimeType="text/*" />
                 <data android:mimeType="image/*" />
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />

@@ -115,6 +115,35 @@ Scans are saved into the app's own storage, never into a folder you added — a
 folder in somebody's Drive is not somewhere an app should start writing
 uninvited.
 
+### Importing a chart from a link
+
+**Share an Ultimate Guitar page into DroidMusic and it becomes a ChordPro file in
+the library.** Find the chart in the phone's browser, tap share, pick DroidMusic:
+the page is fetched, converted, saved, and opened. From then on it is an ordinary
+chart — it transposes, it takes a capo, it goes into a set list, and it is
+matched to other players' copies by content hash like any other.
+
+**What is stored is the chart, not the link.** A bookmark would be less work and
+useless: charts are read on stage, where the wifi belongs to somebody else and
+there may be no signal at all, and a chart that has to be downloaded before it can
+be read is a chart that is not there when it is needed. The page is fetched once
+and the network is never involved in that song again.
+
+The conversion is not a second chart parser. The page carries its own chart as
+data — the site's front end reads it to draw the page — and once the site's `[ch]`
+and `[tab]` markers come off, what is left *is* the chords-over-lyrics format the
+app already reads, with the columns exactly where the chart's author put them. So
+the importer is a decoder: it produces text, and the ordinary parser does the
+rest. The song's name, artist, key, capo and tuning come off the page as
+directives, and the address it came from is written into the file as `{source:}`,
+because a chart that turns out to be a rough transcription is worth being able to
+trace back.
+
+It imports **chord charts**, not Ultimate Guitar's official or Pro tabs — those
+are interactive players with no text behind them, and there is nothing in one to
+import. When that is what was shared, the app says so rather than saving an empty
+file.
+
 ### Turning pages
 
 Tap the **right two thirds** to go forward, the **left third** to go back. The

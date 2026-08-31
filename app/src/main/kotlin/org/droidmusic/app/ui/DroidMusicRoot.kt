@@ -60,6 +60,7 @@ fun DroidMusicRoot(
     pedalActions: SharedFlow<PageAction>,
     rawKeys: SharedFlow<Int>,
     incomingFiles: SharedFlow<android.net.Uri>,
+    sharedText: SharedFlow<String>,
     onImmersive: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
@@ -217,6 +218,29 @@ fun DroidMusicRoot(
                 libraryController.addFiles(listOf(uri))
             }
         }
+    }
+
+    // A chart page shared out of a browser. Back to the library first: that is
+    // where the import reports how it is getting on and, if the page turns out
+    // not to have a chart on it, where it says so. Starting a fetch whose only
+    // progress and only error message are on a screen the player is not looking
+    // at is the same as starting one silently.
+    LaunchedEffect(Unit) {
+        sharedText.collect { shared ->
+            navigator.backToRoot()
+            libraryController.importFromShare(shared)
+        }
+    }
+
+    // Straight into the chart once it lands, for the same reason a scan does:
+    // somebody who shared a chart into the app wanted to read it, and making
+    // them find it in the library again is a step for no reason.
+    val imported = libraryController.imported
+    LaunchedEffect(imported) {
+        val song = imported ?: return@LaunchedEffect
+        libraryController.consumeImported()
+        viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
+        navigator.go(Screen.Viewer(song.id))
     }
 
     BackHandler(enabled = navigator.canGoBack || controlsVisible) {

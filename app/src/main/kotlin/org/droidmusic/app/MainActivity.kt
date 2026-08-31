@@ -60,6 +60,22 @@ class MainActivity : ComponentActivity() {
      */
     private val incomingFiles = MutableSharedFlow<Uri>(replay = 1, extraBufferCapacity = 4)
 
+    /**
+     * Text handed to the app from outside: a chart page shared out of a browser.
+     *
+     * Separate from [incomingFiles] because shared text is not a file and there
+     * is nothing to open until a page has been fetched and converted. Same
+     * `replay = 1` and for the same reason - the share that started the activity
+     * arrives before Compose is collecting anything.
+     *
+     * What is emitted is the whole share, not a link picked out of it. The app
+     * offers itself for every `text/*` share, so text with no chart link in it
+     * will arrive here, and the library is a better place to say so than the
+     * activity: somebody who shared the wrong thing needs to be told, and a
+     * share that is silently dropped looks exactly like an app that crashed.
+     */
+    private val sharedText = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 4)
+
     private val app: DroidMusicApp get() = application as DroidMusicApp
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,6 +100,7 @@ class MainActivity : ComponentActivity() {
                 pedalActions = pedalActions,
                 rawKeys = rawKeys,
                 incomingFiles = incomingFiles,
+                sharedText = sharedText,
                 onImmersive = ::applyImmersiveMode,
             )
         }
@@ -99,19 +116,36 @@ class MainActivity : ComponentActivity() {
         handleIncoming(intent)
     }
 
-    /** Pulls the URI out of a VIEW or SEND intent, whichever kind it is. */
+    /**
+     * Pulls whatever was handed over out of a VIEW or SEND intent.
+     *
+     * A SEND carries one of two quite different things and the app wants both. A
+     * shared *file* is in `EXTRA_STREAM`; a shared *page* is a piece of text in
+     * `EXTRA_TEXT`, which is what a browser's share button sends and what makes
+     * importing a chart from a link possible at all. The file is looked for
+     * first: a share that has both is a file with a note attached, not a link.
+     */
     private fun handleIncoming(intent: Intent?) {
-        val uri = when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data?.let(incomingFiles::tryEmit)
+
+            Intent.ACTION_SEND -> {
+                val stream = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                }
+                if (stream != null) {
+                    incomingFiles.tryEmit(stream)
+                    return
+                }
+                val shared = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+                if (!shared.isNullOrEmpty()) sharedText.tryEmit(shared)
             }
-            else -> null
-        } ?: return
-        incomingFiles.tryEmit(uri)
+
+            else -> Unit
+        }
     }
 
     /**

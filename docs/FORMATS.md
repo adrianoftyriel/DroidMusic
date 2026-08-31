@@ -127,6 +127,54 @@ before saving, or to export it as a PDF and let it be a picture of a page.
 
 ---
 
+## Importing from a chart page
+
+A link to an Ultimate Guitar chord chart, shared into the app, becomes a
+ChordPro file in the library. What is stored is the chart; the link is kept only
+as a `{source:}` directive.
+
+The page carries its own chart as data rather than as rendered markup: a JSON
+blob in a `data-content` attribute, which the site's own front end reads to draw
+the page. That is what is read, so what lands in the library is the chart as its
+author typed it rather than a guess at what the screen looked like.
+
+| On the page | Comes out as |
+|---|---|
+| `[ch]C[/ch]` | The chord `C`, in the column the marker sat in |
+| `[tab]` … `[/tab]` | Nothing — the markers go, the alignment stays |
+| `[Verse 1]`, `[Chorus]`, `[Bridge]` | `{start_of_verse}`, `{start_of_chorus}`, `{start_of_bridge}` |
+| Any other bracketed line, e.g. `[Guitar Solo]` | `{comment:}` |
+| Song name, artist, key, capo, tuning | `{title:}` `{artist:}` `{key:}` `{capo:}` `{tuning:}` |
+| The address it came from | `{source:}` |
+| HTML entities | The characters they stand for |
+
+**Removing the markers does not move anything.** `[ch]` and `[tab]` are invisible
+to somebody reading the page, so the spacing either side of them is already
+counted as though they were not there. Take them off and the columns are exactly
+where the chart's author put them — which, for a chords-over-lyrics chart, *is*
+the notation.
+
+**The format is stated, not sniffed.** Everything else the app opens goes through
+[format sniffing](#format-sniffing); this does not, and the difference matters.
+The sniffer reads a bracketed `[C…]` as an inline ChordPro chord, and this site's
+section headings are bracketed — `[Chorus]` and `[Guitar Solo]` both look like
+one. A body sniffed that way is handed to the ChordPro parser, which finds no
+chords in a chart whose chords are a line *above* the words, and every chord in
+the song is lost silently. The source is known here, so the format is asserted.
+
+**What is not imported.** Official and Pro tabs are interactive players with no
+text chart behind them. There is nothing in one to import, and the app says so
+rather than saving an empty file.
+
+**One annotation is lost.** A repeat marker that shares a line with chords *and*
+has lyrics beneath it — `C  G  D  x2` over a sung line — does not survive, because
+it lives in the chord line and every part of that line that is not a chord
+belongs to the lyric beneath it. On an instrumental line, where there are no
+lyrics to align to, it is kept. This is the ordinary chords-over-lyrics
+behaviour and not particular to importing.
+
+---
+
 ## Chords over lyrics
 
 ```
