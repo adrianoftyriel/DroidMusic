@@ -47,7 +47,15 @@ fun main(args: Array<String>) {
 
     val chordPro = UltimateGuitar.toChordPro(chart)
     val song = SongParser.parse(chordPro)
-    val analysis = ChartAnalyzer.analyze(song)
+
+    // The analyser is the one step here allowed to fail without ending the
+    // report. It is where the awkward cases live - a remote key, an unspellable
+    // note behind a capo - and when it does throw, that exception is the single
+    // most useful line this tool can print, so it is caught and shown rather
+    // than taking the rest of the summary down with it.
+    val analysis = runCatching { ChartAnalyzer.analyze(song) }
+    val analysisError = analysis.exceptionOrNull()
+    val detectedKey = analysis.getOrNull()?.effectiveKey
 
     val sections = song.lines.filterIsInstance<Line.SectionHeader>().map { it.label }
     val lyricLines = song.lines.filterIsInstance<Line.Lyric>()
@@ -57,7 +65,7 @@ fun main(args: Array<String>) {
     println("file        ${file.name}  (${file.length() / 1024} KB)")
     println("title       ${chart.title ?: "-"}")
     println("artist      ${chart.artist ?: "-"}")
-    println("key         declared ${chart.keyText ?: "-"}, detected ${analysis.effectiveKey ?: "-"}")
+    println("key         declared ${chart.keyText ?: "-"}, detected ${detectedKey ?: "-"}")
     println("capo        ${chart.capo}")
     println("tuning      ${chart.tuning ?: "-"}")
     println("file name   ${UltimateGuitar.fileNameFor(chart)}")
@@ -68,6 +76,14 @@ fun main(args: Array<String>) {
     println("lines       ${lyricLines.size} lyric, ${withWords.size} with words")
     println("            ${withWords.count { line -> line.segments.any { it.chord != null } }} of those carry chords")
     println("tab blocks  ${song.lines.count { it is Line.Tab }}")
+
+    if (analysisError != null) {
+        println("-".repeat(72))
+        println("THE ANALYSER THREW on this chart. The import still saves it - the")
+        println("key badge is the only thing lost - but this is a core bug worth")
+        println("reporting, and the stack trace below is what identifies it:")
+        analysisError.printStackTrace()
+    }
 
     // The failure worth catching by eye: chords that came out of the page but
     // did not land on any word. A count cannot tell that from an instrumental

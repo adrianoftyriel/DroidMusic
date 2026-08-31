@@ -22,8 +22,10 @@ import org.droidmusic.library.SongRef
 import org.droidmusic.library.SourceKind
 import org.droidmusic.library.SourceRef
 import org.droidmusic.library.UltimateGuitar
+import org.droidmusic.library.UltimateGuitarChart
 import org.droidmusic.library.normaliseForMatching
 import org.droidmusic.music.ChartAnalyzer
+import org.droidmusic.music.Key
 import org.droidmusic.music.SongParser
 
 /** Drives adding, scanning and searching the library. */
@@ -193,22 +195,42 @@ class LibraryController(
                 "and Pro tabs are interactive players, and there is nothing in one to import."
 
         val chordPro = UltimateGuitar.toChordPro(chart)
-        val song = withContext(Dispatchers.IO) {
-            runCatching { write(UltimateGuitar.fileNameFor(chart), chordPro) }.getOrNull()
-        } ?: return "The chart was read but could not be saved to this device."
+        val written = withContext(Dispatchers.IO) {
+            runCatching { write(UltimateGuitar.fileNameFor(chart), chart, chordPro) }
+        }
+        val song = written.getOrElse { failure ->
+            // Named, not merely refused. "Could not be saved" on its own is a
+            // dead end, and the usual cause - no room left on the device - is
+            // something the player can act on the moment they are told.
+            val reason = failure.message?.trim()?.takeIf { it.isNotEmpty() }
+            return "The chart was read but could not be saved to this device" +
+                (reason?.let { ": $it" } ?: ".")
+        }
 
         file(song)
         imported = song
         return null
     }
 
-    /** Writes the chart into managed storage and describes what was written. */
-    private fun write(fileName: String, chordPro: String): SongRef {
+    /**
+     * Writes the chart into managed storage and describes what was written.
+     *
+     * **Only the write itself may fail this.** The metadata comes from the page,
+     * which has already said what the song is called, who wrote it and what key
+     * it is in, so nothing here re-derives any of that by parsing the file back
+     * in. That round trip was not merely wasted work: it put the key detector on
+     * the path between a converted chart and a saved one, and a chart the
+     * analyser cannot make sense of is still a chart the player asked for.
+     */
+    private fun write(
+        fileName: String,
+        chart: UltimateGuitarChart,
+        chordPro: String,
+    ): SongRef {
         val directory = File(context.filesDir, MANAGED_DIRECTORY).apply { mkdirs() }
         val target = File(directory, uniqueName(directory, fileName))
         target.writeText(chordPro)
 
-        val parsed = SongParser.parse(chordPro)
         return SongRef(
             id = DocumentSources.stableId(DocumentSources.MANAGED_SOURCE_ID, target.name),
             sourceId = DocumentSources.MANAGED_SOURCE_ID,
@@ -218,11 +240,27 @@ class LibraryController(
             sizeBytes = target.length(),
             modifiedAt = target.lastModified(),
             contentHash = DocumentSources.hashOf(chordPro.toByteArray()),
-            title = parsed.meta.title,
-            artist = parsed.meta.artist,
-            keyText = ChartAnalyzer.analyze(parsed).effectiveKey?.toString(),
+            title = chart.title,
+            artist = chart.artist,
+            keyText = chart.keyText?.let { Key.parse(it) }?.toString() ?: detectedKey(chordPro),
         )
     }
+
+    /**
+     * The key worked out from the chords, for a page that did not name one.
+     *
+     * Guarded, as every other caller of the analyser guards it: the viewer so
+     * that a chart which defeats it still gets played, the indexer so that one
+     * awkward file does not empty a folder scan. This is the one part of filing
+     * an imported chart allowed to come back with nothing. A key badge is worth
+     * having and is not worth losing the chart for, and refusing to save a chart
+     * that had already been fetched and converted because the key could not be
+     * guessed is the worst outcome on offer - the player is left with an error
+     * and no file, and nothing they can do differently.
+     */
+    private fun detectedKey(chordPro: String): String? = runCatching {
+        ChartAnalyzer.analyze(SongParser.parse(chordPro)).effectiveKey?.toString()
+    }.getOrNull()
 
     /** Adds the written chart to the index, making the managed source if needed. */
     private suspend fun file(song: SongRef) {
