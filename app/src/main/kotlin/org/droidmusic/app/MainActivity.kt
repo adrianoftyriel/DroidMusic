@@ -69,8 +69,8 @@ class MainActivity : ComponentActivity() {
      * arrives before Compose is collecting anything.
      *
      * What is emitted is the whole share, not a link picked out of it. The app
-     * offers itself for every `text/*` share, so text with no chart link in it
-     * will arrive here, and the library is a better place to say so than the
+     * offers itself for every kind of text share, so text with no chart link in
+     * it will arrive here, and the library is a better place to say so than the
      * activity: somebody who shared the wrong thing needs to be told, and a
      * share that is silently dropped looks exactly like an app that crashed.
      */
