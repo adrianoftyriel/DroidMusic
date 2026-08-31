@@ -2,6 +2,7 @@ package org.droidmusic.music
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NoteTest {
@@ -27,6 +28,63 @@ class NoteTest {
         assertNull(Note.parse("H"))
         assertNull(Note.parse(""))
         assertNull(Note.parse("7"))
+    }
+
+    /**
+     * The crash this guards against: a chart with an E sharp in it, transposed
+     * and then read behind a capo, asks for a note four sharps above B - which
+     * is not a symbol, and which used to fail an assertion inside the Note
+     * constructor and take the app down with it.
+     */
+    @Test
+    fun `a spelling nobody could write falls back to one they could`() {
+        val bSharp = Note.parse("B#")!!.note
+        // Six semitones up with the letter staying put: the exact answer is B
+        // with five flats, which the arithmetic reaches and no one can read.
+        val moved = bSharp.transpose(Interval(0, 6))
+        assertEquals(6, moved.pitchClass)
+        assertTrue("alter was ${moved.alter}", moved.alter in -3..3)
+        // Flat-wards, because that is the direction the spelling was going.
+        assertEquals("Gb", moved.toString())
+    }
+
+    @Test
+    fun `every note survives every interval, on the right pitch`() {
+        for (letter in 0..6) {
+            for (alter in -3..3) {
+                val note = Note(letter, alter)
+                for (letterSteps in 0..6) {
+                    for (semitones in 0..11) {
+                        val moved = note.transpose(Interval(letterSteps, semitones))
+                        assertEquals(
+                            "$note by ($letterSteps, $semitones) landed on $moved",
+                            Math.floorMod(note.pitchClass + semitones, 12),
+                            moved.pitchClass,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a flat chart that has to be respelled stays flat`() {
+        // Three flats deep and asked for one more: the fallback picks the flat
+        // side of the tie rather than flipping the chart into sharps.
+        val tripleFlat = Note(0, -3)
+        val moved = tripleFlat.transpose(Interval(0, 11))
+        assertEquals(8, moved.pitchClass)
+        assertEquals("Ab", moved.toString())
+    }
+
+    @Test
+    fun `the plainest spelling of a pitch is the one with fewest accidentals`() {
+        assertEquals("C", Note.spellingOf(0, preferFlats = false).toString())
+        assertEquals("Bb", Note.spellingOf(10, preferFlats = true).toString())
+        assertEquals("A#", Note.spellingOf(10, preferFlats = false).toString())
+        // Six is a genuine tie - F sharp and G flat are both one accidental.
+        assertEquals("Gb", Note.spellingOf(6, preferFlats = true).toString())
+        assertEquals("F#", Note.spellingOf(6, preferFlats = false).toString())
     }
 
     // The point of storing a letter rather than a pitch class: a fourth above E

@@ -38,6 +38,22 @@ data class Note(val letter: Int, val alter: Int) {
         else -> ""
     }
 
+    /**
+     * Moves the note by [interval], keeping the spelling the interval implies.
+     *
+     * The one exception is the case that used to be a crash. Letter-and-alter
+     * spelling is exact, and being exact means it can be asked for a note that
+     * does not exist to be written down: a chart in a remote key, transposed
+     * again and read behind a capo, can land on the note four sharps above B
+     * sharp. There is no such symbol, and this is not a rare corner - it is a
+     * player pressing the transpose button twice on a chart with an E sharp in
+     * it.
+     *
+     * So past a triple accidental the exact spelling is abandoned for the
+     * plainest one of the same pitch. It is what an arranger writing the part
+     * out would do, and the alternative was an assertion failing inside a data
+     * class constructor and taking the app down mid-song.
+     */
     fun transpose(interval: Interval): Note {
         val newLetter = Math.floorMod(letter + interval.letterSteps, 7)
         // How far the letter moved on its own, in semitones, ignoring octaves.
@@ -45,7 +61,12 @@ data class Note(val letter: Int, val alter: Int) {
         val wantedMove = Math.floorMod(interval.semitones, 12)
         // The alteration absorbs whatever the letter movement did not account for.
         val delta = ((wantedMove - naturalMove + 18) % 12) - 6
-        return Note(newLetter, alter + delta)
+        val moved = alter + delta
+        if (moved in -3..3) return Note(newLetter, moved)
+        return spellingOf(
+            pitchClass = Math.floorMod(pitchClass + interval.semitones, 12),
+            preferFlats = moved < 0,
+        )
     }
 
     companion object {
@@ -60,6 +81,37 @@ data class Note(val letter: Int, val alter: Int) {
         }
 
         fun letterIndex(c: Char): Int = LETTER_NAMES.indexOf(c.uppercaseChar().toString())
+
+        /**
+         * Every way to write [pitchClass] within a double accidental, in letter
+         * order. Double sharps and flats are included because they are real
+         * notation; triples are not, because nobody reads them.
+         */
+        fun spellingsOf(pitchClass: Int): List<Note> {
+            val out = mutableListOf<Note>()
+            for (letter in 0..6) {
+                // The alteration that takes this letter to the target, chosen
+                // within half an octave so the letter stays the nearest one.
+                val delta = ((pitchClass - LETTER_SEMITONES[letter] + 18) % 12) - 6
+                if (delta in -2..2) out += Note(letter, delta)
+            }
+            return out
+        }
+
+        /**
+         * The plainest spelling of [pitchClass]: fewest accidentals, and where
+         * two are equally plain, the side the music was already heading -
+         * a flat chart should not suddenly sprout a sharp.
+         */
+        fun spellingOf(pitchClass: Int, preferFlats: Boolean): Note {
+            val spellings = spellingsOf(pitchClass)
+            return spellings.minWithOrNull(
+                compareBy(
+                    { kotlin.math.abs(it.alter) },
+                    { if ((it.alter < 0) == preferFlats) 0 else 1 },
+                ),
+            ) ?: Note(0, 0)
+        }
 
         /**
          * Parses a note head: a letter, then any run of sharps or flats in either

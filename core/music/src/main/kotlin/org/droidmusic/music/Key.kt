@@ -88,15 +88,6 @@ data class Key(val tonic: Note, val mode: Mode) {
         }
 
         /** Every sensible way to spell a pitch class, from double flat to double sharp. */
-        fun enumerateSpellings(pitchClass: Int): List<Note> {
-            val out = mutableListOf<Note>()
-            for (letter in 0..6) {
-                val natural = Note.LETTER_SEMITONES[letter]
-                // Pick the alteration that lands on the target within one octave.
-                val delta = ((pitchClass - natural + 18) % 12) - 6
-                if (delta in -2..2) out += Note(letter, delta)
-            }
-            return out
-        }
+        fun enumerateSpellings(pitchClass: Int): List<Note> = Note.spellingsOf(pitchClass)
     }
 }

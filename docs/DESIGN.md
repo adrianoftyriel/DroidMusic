@@ -89,6 +89,37 @@ interval, not from twelve independent spelling decisions.
 `unwritable keys are never chosen` is a test, and it checks all 24 keys against
 all 12 transpositions.
 
+### Where exact spelling has to give up
+
+Letter-and-alter spelling is exact, and exact means it can be asked for a note
+that does not exist to be written down. A chart in G♭ with an E♯ in it,
+transposed a tritone and then read behind a capo on 7, lands on a note four
+sharps above B. There is no such symbol.
+
+This was a crash, not a wrong chord: `Note` asserts that its alteration is
+within a triple accidental — a good invariant, checked in the constructor — and
+the transposer walked straight into it. The assertion failed inside a data class
+while a player was looking at the chart, and took the app down. Worse, the same
+arithmetic runs on **open**, because the capo suggestions transpose every chord
+behind the scenes to see which fingering is easiest, so a file nobody had
+touched could kill the app the moment it was tapped.
+
+So past a triple accidental the exact spelling is abandoned for the plainest one
+of the same pitch — fewest accidentals, and on a tie the side the music was
+already heading, so a flat chart does not sprout a sharp. That is what an
+arranger writing the part out would do. The pitch is always right; only the
+spelling is approximated, and only where no readable spelling exists.
+
+Two tests hold this down: every note against every interval must land on the
+correct pitch class, and the whole matrix — every key spelling, every chord
+spelling, every transposition the UI offers, every capo position — must not
+throw.
+
+Belt and braces on top of that: a chart file is arbitrary input, so opening one
+that defeats the parser or the analyser fails to "this chart will not open",
+which the viewer already knows how to say, rather than to a dead app thirty
+seconds before the downbeat.
+
 ### Capo
 
 A capo changes what you finger without changing what anyone hears. So a capo of

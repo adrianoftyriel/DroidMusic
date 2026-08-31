@@ -150,8 +150,15 @@ class ViewerController(
             capo = entry?.capo ?: 0
 
             (opened as? ChartPageSource)?.let { chart ->
-                analysis = ChartAnalyzer.analyze(chart.current.song)
-                applyTranspose()
+                // The chart itself is open and readable by this point. What is
+                // left - the key badge, the capo suggestions, the transposition
+                // the set list asked for - is worth having and not worth the
+                // chart for, so a chart that defeats the analyser still gets
+                // played.
+                runCatching {
+                    analysis = ChartAnalyzer.analyze(chart.current.song)
+                    applyTranspose()
+                }
             }
 
             if (openAtLastPage) {

@@ -144,3 +144,84 @@ class TabTransposerTest {
         assertTrue(!TabTransposer.canShift(block, -1))
     }
 }
+
+/**
+ * The chart nobody writes on purpose, put through everything the app does to a
+ * chart it has just opened.
+ *
+ * These are not exotic-input tests for their own sake. Every spelling here comes
+ * out of a real file at some point - a chart in G flat with an E sharp in it, a
+ * key directive somebody typed as `Cb`, a capo suggestion computed against both
+ * - and until this was fixed the combination did not produce a bad chord, it
+ * killed the process while the player was looking at the chart.
+ */
+class AwkwardSpellingTest {
+
+    private val keys = buildList {
+        for (letter in listOf("C", "D", "E", "F", "G", "A", "B")) {
+            for (accidental in listOf("", "#", "b", "##", "bb")) {
+                for (mode in listOf("", "m")) add("$letter$accidental$mode")
+            }
+        }
+    }
+
+    private val chords = buildList {
+        for (letter in listOf("C", "D", "E", "F", "G", "A", "B")) {
+            for (accidental in listOf("", "#", "b", "##", "bb")) {
+                for (quality in listOf("", "m", "7", "maj7", "m7b5", "sus4", "dim", "aug")) {
+                    add("$letter$accidental$quality")
+                }
+            }
+        }
+    }
+
+    /** Every key, every chord, every transposition the UI can ask for. */
+    @Test
+    fun `nothing in the matrix throws`() {
+        for (keyText in keys) {
+            val key = Key.parse(keyText) ?: continue
+            for (chordText in chords) {
+                val chord = Chord.parse(chordText) ?: continue
+                val song = Song(
+                    SongMeta(key = key),
+                    listOf(Line.Lyric(listOf(Segment(chord, "la")))),
+                )
+                // The transpose control offers -6..5; the capo control 0..11.
+                for (semitones in -6..5) {
+                    for (capo in 0..11) {
+                        val result = Transposer.transpose(
+                            song,
+                            TransposeRequest(semitones = semitones, capo = capo),
+                        )
+                        // Analysis is what runs on open, and where the capo
+                        // suggestions transpose every chord again.
+                        ChartAnalyzer.analyze(result.song)
+                        ChartLayout.paginate(ChartLayout.rows(result.song, true), 30)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Opening is the case that mattered most: no transposition, no capo, just a
+     * chart being put on screen. The capo suggestions still transpose every
+     * chord behind the scenes, which is how a file nobody had touched could
+     * crash the app the moment it was opened.
+     */
+    @Test
+    fun `opening an awkward chart is safe`() {
+        val text = """
+            {title: Awkward}
+            {key: Gb}
+
+            [Gb]One [Cb]two [Fb]three [B#]four
+            [E#]five [Abb]six [Dbb]seven
+        """.trimIndent()
+        val song = SongParser.parse(text)
+        val result = Transposer.transpose(song, TransposeRequest())
+        val analysis = ChartAnalyzer.analyze(result.song)
+        assertEquals("Gb", analysis.effectiveKey.toString())
+        assertTrue(ChartLayout.rows(result.song, true).isNotEmpty())
+    }
+}

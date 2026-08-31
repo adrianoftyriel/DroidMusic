@@ -342,7 +342,14 @@ class ChartPageSource(
         ): ChartPageSource? = withContext(Dispatchers.IO) {
             val text = org.droidmusic.app.data.DocumentSources
                 .readChartText(context.contentResolver, uri, kind) ?: return@withContext null
-            ChartPageSource(SongParser.parse(text), unicodeAccidentals)
+            // A chart file is arbitrary input - written by hand, exported by
+            // some other app, or sent by a band mate - and the honest failure
+            // for arbitrary input is "this one will not open", which the viewer
+            // already knows how to say. It is never a dead app thirty seconds
+            // before the downbeat.
+            runCatching {
+                ChartPageSource(SongParser.parse(text), unicodeAccidentals)
+            }.getOrNull()
         }
     }
 }
