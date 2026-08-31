@@ -24,6 +24,23 @@ import org.droidmusic.music.TransposeResult
 import org.droidmusic.music.Transposer
 
 /**
+ * What opening a chart produced, or why it did not.
+ *
+ * The reason is decided here, at the point of failure, rather than worked out
+ * afterwards by trying the file a second time. A second attempt is a different
+ * attempt: it can succeed where the first failed, and then the viewer explains a
+ * failure that no longer reproduces. It also cannot see the one thing worth
+ * knowing when the bytes were fine and something later went wrong - which
+ * exception, from which step.
+ */
+sealed interface OpenResult {
+    data class Ok(val source: PageSource) : OpenResult
+
+    /** A message written to be shown to the player as it is. */
+    data class Failed(val reason: String) : OpenResult
+}
+
+/**
  * A document the viewer can page through, whatever it actually is.
  *
  * The viewer knows only this interface, which is what lets a PDF, a folder of
@@ -336,20 +353,39 @@ class ChartPageSource(
          */
         suspend fun open(
             context: Context,
+            song: SongRef,
             uri: Uri,
-            kind: FileKind,
             unicodeAccidentals: Boolean,
-        ): ChartPageSource? = withContext(Dispatchers.IO) {
+        ): OpenResult = withContext(Dispatchers.IO) {
             val text = org.droidmusic.app.data.DocumentSources
-                .readChartText(context.contentResolver, uri, kind) ?: return@withContext null
+                .readChartText(context.contentResolver, uri, song.kind)
+                ?: return@withContext OpenResult.Failed(
+                    org.droidmusic.app.data.DocumentSources
+                        .describeOpenFailure(context.contentResolver, song),
+                )
+
             // A chart file is arbitrary input - written by hand, exported by
             // some other app, or sent by a band mate - and the honest failure
             // for arbitrary input is "this one will not open", which the viewer
             // already knows how to say. It is never a dead app thirty seconds
             // before the downbeat.
+            //
+            // What it does say now is which step failed. The bytes are already
+            // in hand at this point, so storage and permissions are not the
+            // cause and saying they might be sends somebody to check a setting
+            // that was never wrong.
             runCatching {
                 ChartPageSource(SongParser.parse(text), unicodeAccidentals)
-            }.getOrNull()
+            }.fold(
+                onSuccess = { OpenResult.Ok(it) },
+                onFailure = { failure ->
+                    OpenResult.Failed(
+                        "It was read - ${text.length} characters - but could not be laid " +
+                            "out as a chart. ${failure::class.java.simpleName}" +
+                            (failure.message?.let { ": $it" } ?: "") + ".",
+                    )
+                },
+            )
         }
     }
 }
@@ -357,19 +393,32 @@ class ChartPageSource(
 object PageSources {
 
     /**
-     * Opens whatever [song] turns out to be. Returns null when the file cannot
-     * be opened at all, which on stage means "this chart is not going to work,
-     * tell them now" rather than a blank screen.
+     * Opens whatever [song] turns out to be, or says why it could not - which on
+     * stage means "this chart is not going to work, and here is the thing to do
+     * about it" rather than a blank screen.
      */
     suspend fun open(
         context: Context,
         song: SongRef,
         unicodeAccidentals: Boolean,
-    ): PageSource? = when (song.kind) {
-        FileKind.PDF -> PdfPageSource.open(context, Uri.parse(song.uri))
-        FileKind.IMAGE -> ImagePageSource(context, listOf(Uri.parse(song.uri)))
-        FileKind.CHORDPRO, FileKind.TEXT, FileKind.DOCX ->
-            ChartPageSource.open(context, Uri.parse(song.uri), song.kind, unicodeAccidentals)
-        FileKind.UNKNOWN -> null
+    ): OpenResult {
+        val uri = Uri.parse(song.uri)
+        return when (song.kind) {
+            FileKind.PDF -> PdfPageSource.open(context, uri)
+                ?.let { OpenResult.Ok(it) }
+                ?: OpenResult.Failed(
+                    org.droidmusic.app.data.DocumentSources
+                        .describeOpenFailure(context.contentResolver, song),
+                )
+
+            FileKind.IMAGE -> OpenResult.Ok(ImagePageSource(context, listOf(uri)))
+
+            FileKind.CHORDPRO, FileKind.TEXT, FileKind.DOCX ->
+                ChartPageSource.open(context, song, uri, unicodeAccidentals)
+
+            FileKind.UNKNOWN -> OpenResult.Failed(
+                "DroidMusic does not recognise this kind of file.",
+            )
+        }
     }
 }

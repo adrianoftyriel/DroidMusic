@@ -6,9 +6,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.render.ChartPageSource
+import org.droidmusic.app.render.OpenResult
 import org.droidmusic.app.render.PageSource
 import org.droidmusic.app.render.PageSources
 import org.droidmusic.library.Setlist
@@ -131,16 +131,18 @@ class ViewerController(
             analysis = null
             transposeNotes = emptyList()
 
-            val opened = PageSources.open(context, ref, unicodeAccidentals)
-            if (opened == null) {
-                loading = false
-                // Asked rather than assumed. A grant Android has stopped
-                // honouring, a file that has moved and a cloud file that was
-                // never fetched all failed here identically before, and only
-                // one of the three was ever named.
-                error = "Could not open ${ref.displayName}. " +
-                    DocumentSources.describeOpenFailure(context.contentResolver, ref)
-                return@launch
+            // The reason comes back with the failure rather than being worked
+            // out afterwards. A grant Android has stopped honouring, a file that
+            // has moved, a cloud file never fetched and a file that reads
+            // perfectly but defeats the chart reader all failed here
+            // identically before, and only one of the four was ever named.
+            val opened = when (val result = PageSources.open(context, ref, unicodeAccidentals)) {
+                is OpenResult.Ok -> result.source
+                is OpenResult.Failed -> {
+                    loading = false
+                    error = "Could not open ${ref.displayName}. ${result.reason}"
+                    return@launch
+                }
             }
 
             song = ref
