@@ -323,6 +323,11 @@ jobs:
           mkdir -p staging
           find app/build/outputs -name '*.apk' -exec cp {} staging/ \;
           find app/build/outputs -name '*.aab' -exec cp {} staging/ \;
+          # The R8 mapping, so an obfuscated name in a crash report can be read
+          # back. Without it "NoClassDefFoundError: u2.l" is the whole story and
+          # there is no way to find out which class u2.l was.
+          find app/build/outputs -name 'mapping.txt' \
+            -exec cp {} staging/mapping-release.txt \; || true
           ls -la staging
 
       - uses: actions/upload-artifact@v4

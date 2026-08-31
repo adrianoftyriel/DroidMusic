@@ -83,10 +83,23 @@ object KeyDetector {
         return KeyEstimate(best, confidence, runnerUp)
     }
 
-    /** The 24 keys, each spelled the way it is normally written. */
+    /**
+     * The 24 keys, each spelled the way it is normally written.
+     *
+     * `Mode.values()` rather than `Mode.entries`, and that is not a style
+     * preference. `entries` is compiled into a call on the Kotlin enum-entries
+     * runtime, which R8 shrank out of the release build - so every chart without
+     * a declared key threw NoClassDefFoundError here, in the release APK only,
+     * where no test could see it. This runs on the path that opens *every* text
+     * chart, because the transposer asks for the key before it can transpose
+     * anything, so the whole feature failed on a class nobody meant to depend on.
+     *
+     * Two enum constants do not need a runtime to iterate. See also the keep
+     * rule in app/proguard-rules.pro, which covers the case if this comes back.
+     */
     fun candidates(): List<Key> = buildList {
         for (pc in 0..11) {
-            for (mode in Mode.entries) {
+            for (mode in Mode.values()) {
                 val spellings = Key.enumerateSpellings(pc)
                     .map { Key(it, mode) }
                     .filter { it.isPractical }
