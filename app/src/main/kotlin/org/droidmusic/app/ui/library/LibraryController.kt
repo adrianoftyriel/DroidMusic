@@ -64,14 +64,26 @@ class LibraryController(
         scope.launch {
             scanning = true
             scanStatus = if (uris.size == 1) "Adding a file" else "Adding ${uris.size} files"
+            lastError = null
+            // Named, not counted. Somebody who picked eleven files and got ten
+            // needs to know which one is missing, and a number does not say.
+            val skipped = mutableListOf<String>()
 
             for ((_, picked) in uris.groupBy { DocumentSources.pickedFilesLabel(it.authority) }) {
                 val source = fileSourceFor(picked.first().authority)
                 val added = picked.mapNotNull { uri ->
                     DocumentSources.persistPermission(context, uri)
-                    val name = displayName(uri) ?: return@mapNotNull null
-                    val kind = SongRef.kindOf(name, context.contentResolver.getType(uri))
-                    if (kind == FileKind.UNKNOWN) return@mapNotNull null
+                    val name = displayName(uri) ?: uri.lastPathSegment ?: "that file"
+                    val kind = DocumentSources.kindOfPickedFile(
+                        resolver = context.contentResolver,
+                        uri = uri,
+                        displayName = name,
+                        mimeType = context.contentResolver.getType(uri),
+                    )
+                    if (kind == FileKind.UNKNOWN) {
+                        skipped += name
+                        return@mapNotNull null
+                    }
                     SongRef(
                         id = DocumentSources.stableId(source.id, uri.toString()),
                         sourceId = source.id,
@@ -93,6 +105,19 @@ class LibraryController(
 
             scanning = false
             scanStatus = ""
+
+            // A file that was asked for by name and then quietly did not appear
+            // is the worst outcome here: there is nothing on screen to explain
+            // it and nothing to try next.
+            if (skipped.isNotEmpty()) {
+                lastError = buildString {
+                    append(if (skipped.size == 1) "Could not read " else "Could not read these: ")
+                    append(skipped.take(5).joinToString(", "))
+                    if (skipped.size > 5) append(", and ${skipped.size - 5} more")
+                    append(". DroidMusic opens PDFs, images, Word documents and any chart ")
+                    append("saved as text - ChordPro included, whatever it is called.")
+                }
+            }
         }
     }
 

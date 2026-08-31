@@ -18,9 +18,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.withContext
 import org.droidmusic.app.DroidMusicApp
 import org.droidmusic.app.data.AppSettings
+import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.input.PageAction
 import org.droidmusic.app.capture.CaptureController
 import org.droidmusic.app.capture.CaptureScreen
@@ -196,9 +199,18 @@ fun DroidMusicRoot(
     LaunchedEffect(Unit) {
         incomingFiles.collect { uri ->
             val name = uri.toString().lowercase()
-            if (name.endsWith(".dmset") || name.endsWith(".json") ||
-                context.contentResolver.getType(uri) == "application/json"
-            ) {
+            // The name first, because it is free and usually right. Then the
+            // content, because a set list shared out of a messaging app arrives
+            // with its name gone and its type reduced to "some bytes" - and
+            // filing one into the library as a chart would be a wrong answer
+            // that looks like a right one.
+            val isSetlist = name.endsWith(".dmset") || name.endsWith(".json") ||
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.getType(uri) == "application/json" ||
+                        DocumentSources.looksLikeSetlist(context.contentResolver, uri)
+                }
+
+            if (isSetlist) {
                 setlistController.import(uri)
                 navigator.go(Screen.Setlists)
             } else {

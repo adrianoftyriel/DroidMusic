@@ -29,6 +29,36 @@ contains a `{directive}` or an inline `[C]`; otherwise it is chords-over-lyrics
 if any line parses as a chord line; otherwise it is plain text and is laid out
 as-is.
 
+### And when the name says nothing at all
+
+ChordPro has no registered MIME type. Android's own table has never heard of
+`.cho`, `.chopro`, `.crd` or `.pro`, so every provider on the device hands one
+over as `application/octet-stream` — the same answer it gives for a firmware
+image. Two consequences, both of which used to read as "this app does not
+support ChordPro":
+
+- **Opening one from outside the app.** DroidMusic accepts
+  `application/octet-stream` on its VIEW and SEND filters, so a chart tapped in
+  a file manager, or shared out of another editor, offers DroidMusic as
+  somewhere to open it. Without that line the system says the file type is not
+  supported and there is nothing the app can do about it, because it was never
+  asked.
+- **A file picked by hand whose extension is not on the list above.** The table
+  is a convenience, not a gate. When a picked file's name says nothing useful,
+  the first 4KB are read and asked whether they are text — a NUL byte is the
+  giveaway — and anything that is text is opened as a chart, with the format
+  sniffing above then working out what kind. Somebody else's convention
+  (`.songbook`, `.cp`, no extension at all) is not wrong, it is just not on a
+  list this app happened to write down.
+
+Sniffing is only done for files picked or opened deliberately. A folder scan
+stays on extensions, because sniffing every file in a scanned folder would mean
+opening every file in a scanned folder.
+
+A file that is genuinely not readable is **named**. "Could not read
+Rehearsal.zip" is a thing to act on; a file that was asked for and then quietly
+did not appear is not.
+
 ---
 
 ## ChordPro

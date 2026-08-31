@@ -123,6 +123,38 @@ data class SongRef(
             }
         }
 
+        /**
+         * Whether the start of a file looks like text rather than a binary blob.
+         *
+         * Needed because a chart's extension is not a reliable thing to ask.
+         * ChordPro has six extensions in common use and no registered MIME type
+         * at all, so a provider hands one over as `application/octet-stream` -
+         * the same answer it gives for a firmware image. Every editor that
+         * writes them picks its own favourite, and somebody's own convention
+         * (`.song`, `.cp`, no extension at all) is not wrong, it is just not on
+         * a list this app happened to write down.
+         *
+         * So when the name says nothing, the content is asked. A NUL byte is
+         * the giveaway - text does not contain them and nearly every binary
+         * format does within its first few bytes - with a small tolerance for
+         * stray control characters, because a chart exported from a word
+         * processor sometimes carries one.
+         */
+        fun looksLikeText(bytes: ByteArray, length: Int = bytes.size): Boolean {
+            val end = length.coerceIn(0, bytes.size)
+            if (end == 0) return false
+            var control = 0
+            for (i in 0 until end) {
+                val byte = bytes[i].toInt() and 0xFF
+                if (byte == 0) return false
+                // Tab, newline, carriage return and form feed are text.
+                val printable = byte >= 0x20 || byte == 0x09 || byte == 0x0A ||
+                    byte == 0x0D || byte == 0x0C
+                if (!printable) control++
+            }
+            return control * 100 < end
+        }
+
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "heic", "heif")
         val CHORDPRO_EXTENSIONS = setOf("cho", "chopro", "chord", "chordpro", "crd", "pro")
         val TEXT_EXTENSIONS = setOf("txt", "text", "tab", "md")

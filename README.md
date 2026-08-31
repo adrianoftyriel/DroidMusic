@@ -67,6 +67,14 @@ folder you have taken away from it.
 Opens `.pdf`, images (`.png .jpg .webp .heic` and friends), Word documents
 (`.docx`), and chord charts in `.cho .chopro .pro .crd .txt .tab .md`.
 
+Charts also arrive from outside: tap one in a file manager, or share it across
+from another editor, and DroidMusic is offered. ChordPro has no registered file
+type of its own, so a `.cho` looks to Android like an anonymous blob — the app
+accepts those and works out what they are by reading them, rather than telling
+you the file is not supported. A chart picked by hand whose extension is on
+nobody's list still opens if it is text; one that genuinely cannot be read is
+named rather than silently skipped.
+
 A chord chart typed in Word is unzipped, read as text, and then transposed, key-
 detected and paginated exactly like any other text chart — same parser, no second
 code path, and no document library in the APK. Charts set in a monospaced font

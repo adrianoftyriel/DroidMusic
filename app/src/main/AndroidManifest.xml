@@ -100,7 +100,6 @@
                 <data android:scheme="content" />
                 <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
-                <data android:mimeType="text/plain" />
                 <data android:mimeType="image/*" />
                 <data android:mimeType="application/json" />
                 <!--
@@ -110,19 +109,56 @@
                   then fail to open most of them.
                 -->
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <!--
+                  Every text chart, not only text/plain. A chart written by
+                  another app can arrive as text/markdown or text/x-chordpro
+                  depending on who is doing the telling, and all of them are
+                  characters this app can read.
+                -->
+                <data android:mimeType="text/*" />
+                <!--
+                  And the type a ChordPro file actually arrives as.
+
+                  ChordPro has no registered MIME type. Android's own table has
+                  never heard of .cho, .chopro, .crd or .pro, so every provider
+                  on the device falls back to application/octet-stream - which
+                  is why, without this line, a chart made in another app cannot
+                  be opened from a file manager at all and the system says the
+                  file is not supported.
+
+                  It is a wider claim than the rest of this filter, and it is
+                  narrower than it looks: octet-stream is the "no idea" type, so
+                  archives, installers and media all have their own and none of
+                  them land here. What does land is unknown files, where being
+                  one entry in a chooser the user picks from is the correct
+                  amount of presumption. Anything that turns out not to be a
+                  chart is refused by name rather than silently ignored - see
+                  DocumentSources.kindOfPickedFile.
+                -->
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
             <!--
-              A set list arriving through another app's share sheet.
+              A chart or a set list arriving through another app's share sheet.
 
               Separate from the filter above because a SEND carries its payload
               in EXTRA_STREAM rather than in the intent's data URI, so matching
               on a scheme would reject every share. SEND matches on type alone.
+
+              This is how a chart written on a laptop or in another editor
+              usually crosses over: not through a file manager, but by being
+              shared. Accepting only set lists here meant DroidMusic did not
+              appear in that share sheet at all.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/json" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
 

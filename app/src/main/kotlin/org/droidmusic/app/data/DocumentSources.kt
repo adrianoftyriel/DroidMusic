@@ -314,6 +314,75 @@ object DocumentSources {
     }
 
     /**
+     * What a file the user handed over directly turns out to be.
+     *
+     * The name is asked first, and usually answers. When it does not - which for
+     * ChordPro is common, because the format has six extensions in use, no
+     * registered MIME type, and every provider therefore calls one an
+     * `application/octet-stream` - the first few kilobytes are read and asked
+     * instead. Anything that is text is opened as a chart, and the parser works
+     * out from the content whether it is ChordPro, chords over lyrics or plain
+     * words; it never needed the extension to tell it that.
+     *
+     * Only for files picked or opened deliberately. A folder scan stays on
+     * extensions, because sniffing every file in somebody's Documents folder
+     * would mean opening every file in somebody's Documents folder.
+     */
+    suspend fun kindOfPickedFile(
+        resolver: ContentResolver,
+        uri: Uri,
+        displayName: String,
+        mimeType: String?,
+    ): FileKind = withContext(Dispatchers.IO) {
+        val byName = SongRef.kindOf(displayName, mimeType)
+        if (byName != FileKind.UNKNOWN) {
+            byName
+        } else if (looksLikeText(resolver, uri)) {
+            FileKind.TEXT
+        } else {
+            FileKind.UNKNOWN
+        }
+    }
+
+    /**
+     * Whether a file handed to the app is one of its own set lists.
+     *
+     * Asked of the content rather than the name because a set list shared out of
+     * a messaging app arrives with its name stripped and its type reduced to
+     * `application/octet-stream`, and the difference between a set list and a
+     * chart decides which half of the app opens it.
+     */
+    fun looksLikeSetlist(resolver: ContentResolver, uri: Uri): Boolean {
+        val head = firstBytes(resolver, uri) ?: return false
+        val text = String(head, Charsets.UTF_8)
+        return text.trimStart().startsWith("{") &&
+            text.contains("\"setlist\"") &&
+            text.contains("\"formatVersion\"")
+    }
+
+    /** Reads the first few kilobytes and asks whether they are text. */
+    private fun looksLikeText(resolver: ContentResolver, uri: Uri): Boolean {
+        val head = firstBytes(resolver, uri) ?: return false
+        return SongRef.looksLikeText(head, head.size)
+    }
+
+    private fun firstBytes(resolver: ContentResolver, uri: Uri): ByteArray? = runCatching {
+        resolver.openInputStream(uri)?.use { stream ->
+            val buffer = ByteArray(SNIFF_BYTES)
+            var total = 0
+            while (total < buffer.size) {
+                val read = stream.read(buffer, total, buffer.size - total)
+                if (read <= 0) break
+                total += read
+            }
+            if (total == 0) null else buffer.copyOf(total)
+        }
+    }.getOrNull()
+
+    /** Enough to see a chart's first directive, and small enough to be free. */
+    private const val SNIFF_BYTES = 4096
+
+    /**
      * Reads a chart as text, whatever it is stored as.
      *
      * The one place that knows a Word document is not a text file. Everything

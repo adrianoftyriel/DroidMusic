@@ -197,4 +197,115 @@ class FileKindTest {
         assertEquals("Wagon Wheel", untitled.bestTitle)
         assertEquals("Real Title", untitled.copy(title = "Real Title").bestTitle)
     }
+
+    @Test
+    fun `every chordpro extension is a chart`() {
+        for (extension in SongRef.CHORDPRO_EXTENSIONS) {
+            assertEquals(
+                "song.$extension",
+                FileKind.CHORDPRO,
+                SongRef.kindOf("song.$extension"),
+            )
+        }
+    }
+
+    /**
+     * ChordPro has no registered MIME type, so every provider on the device
+     * calls one an `application/octet-stream` - the same answer it gives for a
+     * firmware image. The extension has to win.
+     */
+    @Test
+    fun `a chart is still a chart when the provider calls it a blob`() {
+        assertEquals(
+            FileKind.CHORDPRO,
+            SongRef.kindOf("Wayfaring Stranger.cho", "application/octet-stream"),
+        )
+    }
+
+    @Test
+    fun `a name with dots in it is judged on the last one`() {
+        assertEquals(FileKind.CHORDPRO, SongRef.kindOf("Ain't No Sunshine (live).v2.cho"))
+        assertEquals(FileKind.PDF, SongRef.kindOf("The Band. Best of.pdf"))
+    }
+
+    @Test
+    fun `every extension the picker offers is one the app can open`() {
+        for (extension in SongRef.ALL_EXTENSIONS) {
+            assertTrue(
+                "kindOf did not recognise .$extension",
+                SongRef.kindOf("chart.$extension") != FileKind.UNKNOWN,
+            )
+        }
+    }
+}
+
+/**
+ * The last resort when a file's name says nothing: read the start of it and ask
+ * whether it is text.
+ *
+ * This is what lets a chart called `.songbook`, or called nothing at all, still
+ * open. The extension list is a convenience, not a gate - somebody else's
+ * convention is not wrong, it is just not on a list this app happened to write
+ * down.
+ */
+class TextSniffTest {
+
+    @Test
+    fun `a chordpro file reads as text`() {
+        val chart = """
+            {title: Wayfaring Stranger}
+            {key: Am}
+
+            [Am]I am a poor way[C]faring [G]stranger
+        """.trimIndent().toByteArray()
+        assertTrue(SongRef.looksLikeText(chart))
+    }
+
+    @Test
+    fun `a binary file does not`() {
+        // A PNG header: the NUL in the second word is the giveaway.
+        val png = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        )
+        assertFalse(SongRef.looksLikeText(png))
+    }
+
+    @Test
+    fun `an empty file is not text`() {
+        assertFalse(SongRef.looksLikeText(ByteArray(0)))
+        assertFalse(SongRef.looksLikeText(ByteArray(16), length = 0))
+    }
+
+    @Test
+    fun `only the bytes that were read are judged`() {
+        // A 4k buffer holding a 27-byte chart is 4k of NUL after it, and reading
+        // the whole buffer would call every short chart a binary.
+        val buffer = ByteArray(4096)
+        val chart = "{title: Short}\n[C]One line\n".toByteArray()
+        chart.copyInto(buffer)
+        assertTrue(SongRef.looksLikeText(buffer, chart.size))
+        assertFalse(SongRef.looksLikeText(buffer))
+    }
+
+    @Test
+    fun `accented lyrics and unicode accidentals are text`() {
+        val chart = "{title: \u00c9t\u00e9}\n[B\u266d]O\u00f9 sont les mots\n"
+            .toByteArray(Charsets.UTF_8)
+        assertTrue(SongRef.looksLikeText(chart))
+    }
+
+    @Test
+    fun `a stray control character does not condemn a whole chart`() {
+        // A chart exported from a word processor sometimes carries one.
+        val chart = ("{title: Exported}\n\u000b" + "[C]Words and more words\n".repeat(20))
+            .toByteArray()
+        assertTrue(SongRef.looksLikeText(chart))
+    }
+
+    @Test
+    fun `a file that is mostly control bytes is not a chart`() {
+        val noisy = ByteArray(200) { if (it % 2 == 0) 0x01 else 0x41 }
+        assertFalse(SongRef.looksLikeText(noisy))
+    }
 }
