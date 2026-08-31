@@ -54,6 +54,13 @@ class LibraryController(
     var imported by mutableStateOf<SongRef?>(null)
         private set
 
+    /**
+     * The chart just removed from the library, so the screen can offer to undo
+     * it. Cleared when the offer is taken or dismissed.
+     */
+    var removed by mutableStateOf<SongRef?>(null)
+        private set
+
     fun addTree(treeUri: Uri) {
         scope.launch {
             if (!DocumentSources.persistPermission(context, treeUri)) {
@@ -424,6 +431,82 @@ class LibraryController(
 
     fun dismissError() {
         lastError = null
+    }
+
+    // ---- What a press and hold offers -------------------------------------
+
+    /**
+     * Renames a chart, for DroidMusic's purposes only. The file is not touched.
+     *
+     * What counts as a rename and what counts as clearing one is
+     * [SongRef.withRename], in the core, so that the rule has a test.
+     */
+    fun rename(song: SongRef, name: String) {
+        scope.launch { repository.updateSong(song.id) { it.withRename(name) } }
+    }
+
+    /**
+     * Stops listing a chart, without touching the file.
+     *
+     * Held in [removed] afterwards so the screen can offer to undo it. That
+     * matters more here than it looks: the chart is invisible the moment this
+     * runs, so without an undo the only way back would be a menu the user cannot
+     * reach any more.
+     */
+    fun removeFromLibrary(song: SongRef) {
+        scope.launch {
+            repository.updateSong(song.id) { it.copy(hidden = true) }
+            removed = song
+        }
+    }
+
+    /** Puts back a chart that was removed from the library. */
+    fun restore(song: SongRef) {
+        scope.launch {
+            repository.updateSong(song.id) { it.copy(hidden = false) }
+            if (removed?.id == song.id) removed = null
+        }
+    }
+
+    /** Puts back every chart that was removed from the library. */
+    fun restoreAllRemoved() {
+        scope.launch {
+            repository.restoreHidden()
+            removed = null
+        }
+    }
+
+    fun dismissRemoved() {
+        removed = null
+    }
+
+    /**
+     * Whether the file behind a chart can actually be deleted, which decides
+     * whether the menu offers to.
+     *
+     * True for the copies this app made - a photographed page, a chart imported
+     * from a link - and false for anything in one of the user's own folders,
+     * because the app holds read access to those and nothing more.
+     */
+    fun canDeleteFile(song: SongRef): Boolean = DocumentSources.canDeleteFile(context, song)
+
+    /**
+     * Deletes the file behind a chart and forgets it.
+     *
+     * The index entry is dropped rather than hidden. Hiding exists to stop a
+     * rescan resurrecting a chart whose file is still there, and there is nothing
+     * to resurrect once the file is gone.
+     */
+    fun deleteFile(song: SongRef) {
+        scope.launch {
+            if (DocumentSources.deleteFile(context, song)) {
+                repository.dropSong(song.id)
+            } else {
+                lastError = "Could not delete ${song.bestTitle}. " +
+                    "DroidMusic has read-only access to that file, so deleting it has to be " +
+                    "done wherever it lives."
+            }
+        }
     }
 
     /** "12 charts - Google Drive", for a row in the folder list. */

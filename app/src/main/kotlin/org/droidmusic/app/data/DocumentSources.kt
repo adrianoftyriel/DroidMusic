@@ -3,7 +3,9 @@ package org.droidmusic.app.data
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Process
 import android.provider.DocumentsContract
 import java.security.MessageDigest
 import java.util.UUID
@@ -154,19 +156,96 @@ object DocumentSources {
      * somewhere it should not have - cannot turn into a deleted chart.
      */
     fun deleteManagedCopies(context: Context, songs: List<SongRef>) {
-        val managed = runCatching {
-            java.io.File(context.filesDir, "managed").canonicalFile
-        }.getOrNull() ?: return
-
         for (song in songs) {
-            val uri = Uri.parse(song.uri)
-            if (uri.scheme != "file") continue
-            val path = uri.path ?: continue
-            val file = runCatching { java.io.File(path).canonicalFile }.getOrNull() ?: continue
-            if (file.parentFile != managed) continue
-            runCatching { file.delete() }
+            managedFile(context, Uri.parse(song.uri))?.let { file -> runCatching { file.delete() } }
         }
     }
+
+    /**
+     * The file behind a URI, but only if it is one of this app's own managed
+     * copies.
+     *
+     * The parent check is the whole point and is deliberately the only way to a
+     * `File.delete()` in this app. A song row that had picked up a `file://` URI
+     * from somewhere it should not have cannot turn into a deleted chart, because
+     * the answer here is null for anything outside the managed directory.
+     */
+    private fun managedFile(context: Context, uri: Uri): java.io.File? {
+        if (uri.scheme != "file") return null
+        val managed = runCatching {
+            java.io.File(context.filesDir, "managed").canonicalFile
+        }.getOrNull() ?: return null
+        val path = uri.path ?: return null
+        val file = runCatching { java.io.File(path).canonicalFile }.getOrNull() ?: return null
+        return file.takeIf { it.parentFile == managed }
+    }
+
+    /**
+     * Whether this app can actually delete the file behind a chart.
+     *
+     * Asked before offering to, rather than discovered by trying. A menu item
+     * that fails when tapped is worse than one that is not there, and for most
+     * charts in most libraries the honest answer here is no:
+     *
+     *  - A **managed copy** - a photographed page, or a chart imported from a
+     *    link - belongs to this app outright, and can go.
+     *  - A chart in **one of the user's folders**, local or cloud, cannot. The
+     *    app asks the system file picker for read access and nothing more (see
+     *    [pickTreeIntent]), so it holds no write grant to delete with. Deleting
+     *    those is the file manager's job, or Drive's.
+     *
+     * The provider's own flag is checked as well as the grant, because a provider
+     * may refuse deletion on a file it has otherwise shared for writing. Both
+     * halves are required, so if this app ever does start asking for write
+     * access, this begins returning true on its own and the menu item appears
+     * without anything here changing.
+     */
+    fun canDeleteFile(context: Context, song: SongRef): Boolean {
+        val uri = Uri.parse(song.uri)
+        if (uri.scheme == "file") return managedFile(context, uri) != null
+        if (!hasWritePermission(context, uri)) return false
+        return (documentFlags(context, uri) and DocumentsContract.Document.FLAG_SUPPORTS_DELETE) != 0
+    }
+
+    /**
+     * Deletes the file behind a chart, returning whether it went.
+     *
+     * Guarded by the same [managedFile] check as everything else that deletes,
+     * so this cannot be talked into removing a file outside the app's own storage
+     * by handing it a `file://` URI.
+     */
+    suspend fun deleteFile(context: Context, song: SongRef): Boolean =
+        withContext(Dispatchers.IO) {
+            val uri = Uri.parse(song.uri)
+            if (uri.scheme == "file") {
+                val file = managedFile(context, uri) ?: return@withContext false
+                runCatching { file.delete() }.getOrDefault(false)
+            } else {
+                runCatching {
+                    DocumentsContract.deleteDocument(context.contentResolver, uri)
+                }.getOrDefault(false)
+            }
+        }
+
+    private fun hasWritePermission(context: Context, uri: Uri): Boolean = runCatching {
+        context.checkUriPermission(
+            uri,
+            Process.myPid(),
+            Process.myUid(),
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        ) == PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
+
+    /** A document's capability flags, or zero when the provider will not say. */
+    private fun documentFlags(context: Context, uri: Uri): Int = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(DocumentsContract.Document.COLUMN_FLAGS),
+            null,
+            null,
+            null,
+        )?.use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 } ?: 0
+    }.getOrDefault(0)
 
     /**
      * Why a chart would not open, asked only once one already has not.

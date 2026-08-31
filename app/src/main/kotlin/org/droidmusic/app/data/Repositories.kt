@@ -56,29 +56,32 @@ class LibraryRepository(directory: File, scope: CoroutineScope) {
     /**
      * Replaces everything known about one source after a rescan.
      *
-     * User-set fields are carried across by uri, because a rescan must not
-     * silently discard the key somebody corrected by hand or the songs they
-     * starred.
+     * The merge itself is [LibraryIndex.withSongsFrom], in the core, where it can
+     * be tested without a device - a rescan that silently discarded a corrected
+     * key, a renamed chart or a removed one would look exactly like a successful
+     * rescan, and that is the kind of failure the core exists to hold.
      */
     suspend fun replaceSongsFrom(sourceId: String, songs: List<SongRef>, now: Long) =
-        store.update { current ->
-            val previous = current.songsFrom(sourceId).associateBy { it.uri }
-            val merged = songs.map { fresh ->
-                val old = previous[fresh.uri] ?: return@map fresh
-                fresh.copy(
-                    userKeyText = old.userKeyText,
-                    favourite = old.favourite,
-                    tags = old.tags,
-                )
-            }
-            current.copy(
-                songs = current.songs.filterNot { it.sourceId == sourceId } + merged,
-                updatedAt = now,
-            )
-        }
+        store.update { current -> current.withSongsFrom(sourceId, songs, now) }
 
     suspend fun updateSong(id: String, transform: (SongRef) -> SongRef) = store.update { current ->
         current.copy(songs = current.songs.map { if (it.id == id) transform(it) else it })
+    }
+
+    /**
+     * Forgets a chart entirely, for use after its file has actually been deleted.
+     *
+     * Different from hiding it: hiding is remembered so that a rescan does not put
+     * the chart back, and there is nothing to remember about a file that no longer
+     * exists.
+     */
+    suspend fun dropSong(id: String) = store.update { current ->
+        current.copy(songs = current.songs.filterNot { it.id == id })
+    }
+
+    /** Brings back every chart the user removed from the library. */
+    suspend fun restoreHidden() = store.update { current ->
+        current.copy(songs = current.songs.map { if (it.hidden) it.copy(hidden = false) else it })
     }
 }
 

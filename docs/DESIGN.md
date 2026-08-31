@@ -24,7 +24,7 @@ Silent failures need tests, and tests need to be cheap enough that they are run
 constantly. Splitting the core out means:
 
 ```sh
-./gradlew -PcoreOnly coreTests      # 260 tests, no Android SDK, seconds
+./gradlew -PcoreOnly coreTests      # 273 tests, no Android SDK, seconds
 ```
 
 which runs on any machine with a JDK, gates the APK build in CI, and gives a
@@ -242,6 +242,41 @@ storage-access screens as this app having access to that folder, which is untrue
 and unnerving to find; and the platform caps how many an app may hold, so a
 library rearranged a few times over a couple of years can quietly stop being able
 to take a new one.
+
+### Read access, and what that rules out
+
+The grant this app asks for is **read only** — `FLAG_GRANT_READ_URI_PERMISSION`
+and no more, both when a folder is picked and when it is persisted. That is a
+deliberate limit rather than an oversight, and it is worth being explicit about
+what it costs, because the cost is a feature people ask for.
+
+It means the app cannot delete or rename a file in one of the user's folders. So
+the press-and-hold menu on a chart offers **Remove from library**, which is
+bookkeeping and always works, and offers **Delete file** only for the copies the
+app made itself — a photographed page, a chart imported from a link — where it
+owns the file outright. `DocumentSources.canDeleteFile` asks before the menu is
+drawn rather than letting the action fail when tapped, and it checks both the
+grant and the provider's own `FLAG_SUPPORTS_DELETE`, so if a write grant is ever
+introduced the item starts appearing without that code changing.
+
+Renaming is the same shape of answer. It is stored as an override on the library
+entry (`SongRef.userTitle`) rather than written into the file, which keeps the
+app out of somebody's synced folder and works for every source and every format
+including PDFs. The honest cost is that DroidMusic's name for a chart can then
+differ from the name every other app shows.
+
+Asking for write access would fix both and is not obviously right: the same grant
+that permits deleting one chart permits rewriting the whole folder, on an app
+whose entire job is to be pointed at somebody's sheet music collection. It would
+also not be retroactive — every folder already added would stay read-only until
+re-picked — so it is a decision with a migration attached rather than a flag to
+flip.
+
+The one deletion the app does perform is confined by construction, not by care:
+`DocumentSources.managedFile` returns a `File` only when it resolves inside the
+app's own managed directory, and it is the only route to a `File.delete()` in the
+codebase. A song row that had somehow picked up a `file://` URI from elsewhere
+cannot become a deleted chart.
 
 ### The folder that is not in the folder picker
 

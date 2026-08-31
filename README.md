@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 260 tests that run on a plain JVM; the
+band-sync and update layers are covered by 273 tests that run on a plain JVM; the
 app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -81,6 +81,43 @@ code path, and no document library in the APK. Charts set in a monospaced font
 come out as they went in; one aligned by eye in a proportional font never lined
 up in *characters* and wants to be a PDF. [docs/FORMATS.md](docs/FORMATS.md) sets
 out exactly what survives the trip.
+
+### Sorting the library out
+
+Hold a chart in the list and it offers what can be done with it.
+
+| | |
+|---|---|
+| **Add to a set list** | Files it into tonight's running order without leaving the library. |
+| **Rename** | Changes what DroidMusic calls it. |
+| **Remove from library** | Stops listing it. The file is not touched. |
+| **Delete file** | Deletes it, and only appears when that is actually possible. |
+
+**Renaming changes the name here and nowhere else.** A chart's title normally
+comes from inside the file - `{title:}` in a ChordPro, the filename for a PDF -
+and a rename is stored as an override next to it rather than written back. So the
+file keeps its own name, your Drive folder keeps showing it, and clearing the box
+goes back to whatever the chart says it is called. The cost is that the two names
+can differ; the alternative is this app writing into a file in somebody's synced
+folder, which is not a thing it should do quietly and not a thing it has
+permission to do at all.
+
+**Removing is not deleting, and it sticks.** A removed chart stops being listed,
+stops resolving from a set list, and stops matching a follower's request in a
+band session - but the file stays exactly where it is. It is remembered as
+removed rather than simply forgotten, because forgetting it would last only until
+the next folder scan found the file and put it straight back. There is an
+**Undo** on the banner, and the folder list keeps a **Put back** for anything
+already dismissed.
+
+**Deleting the file is offered only where it can be done.** DroidMusic asks
+Android for *read* access to your folders and nothing more, so it holds no
+permission to delete anything in them - which is the right default for an app
+pointed at somebody's entire sheet music collection, and it means a chart in a
+folder or a cloud drive has to be deleted wherever it lives. What it *can* delete
+is what it made itself: a photographed page, or a chart imported from a link. So
+that is when the menu item is there, and the rest of the time it is absent rather
+than present and failing.
 
 ### Photographing music
 

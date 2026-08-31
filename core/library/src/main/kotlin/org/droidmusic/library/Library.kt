@@ -93,11 +93,55 @@ data class SongRef(
     /** Set by the user; overrides anything detected. */
     val userKeyText: String? = null,
     val favourite: Boolean = false,
+
+    /**
+     * What the user renamed this chart to, if they did.
+     *
+     * A rename changes what DroidMusic calls the chart and nothing else. The file
+     * is not touched and its own `{title:}` is not rewritten, which means the
+     * name here can differ from the name every other app shows - a real cost,
+     * and the one worth paying: the alternative is writing to a file in somebody
+     * else's synced folder, on a grant this app does not even hold.
+     */
+    val userTitle: String? = null,
+
+    /**
+     * Removed from the library without being deleted.
+     *
+     * The chart stays in the index rather than being dropped from it, because
+     * dropping it would only work until the next rescan found the file again and
+     * put it straight back. So it is remembered, and remembered as hidden.
+     */
+    val hidden: Boolean = false,
 ) {
     val key: Key? get() = (userKeyText ?: keyText)?.let { Key.parse(it) }
 
-    /** Title if the file said what it was, filename otherwise. */
-    val bestTitle: String get() = title?.takeIf { it.isNotBlank() } ?: displayName.substringBeforeLast('.')
+    /**
+     * What to call this chart: the user's name for it, then the one the file
+     * declared, then the filename.
+     */
+    val bestTitle: String get() = userTitle?.takeIf { it.isNotBlank() }
+        ?: title?.takeIf { it.isNotBlank() }
+        ?: displayName.substringBeforeLast('.')
+
+    /** The name the file itself gives, ignoring any rename - shown when renaming. */
+    val detectedTitle: String get() = title?.takeIf { it.isNotBlank() }
+        ?: displayName.substringBeforeLast('.')
+
+    /**
+     * Applies a rename, or takes one away.
+     *
+     * A blank name clears the override, and so does a name that matches what the
+     * file already says it is called. That second case is the one worth having a
+     * rule for: without it, renaming a chart to the title it already has would
+     * store a redundant override that then quietly outlived every later
+     * correction to the file itself, so fixing a typo in a chart's `{title:}`
+     * would appear to do nothing.
+     */
+    fun withRename(name: String): SongRef {
+        val wanted = name.trim()
+        return copy(userTitle = wanted.takeIf { it.isNotEmpty() && it != detectedTitle })
+    }
 
     /**
      * Whether the chart is text the app can rewrite.
@@ -184,7 +228,57 @@ data class LibraryIndex(
 ) {
     fun songsFrom(sourceId: String): List<SongRef> = songs.filter { it.sourceId == sourceId }
 
-    fun findById(id: String): SongRef? = songs.firstOrNull { it.id == id }
+    /**
+     * Looks up a chart by id, ignoring anything removed from the library.
+     *
+     * Removed means removed. The library list is not the only way to reach a
+     * chart - a set list entry and a follower in a band session both arrive by
+     * id or by hash - and a chart that cannot be seen or found should not be
+     * openable through a side door either. What those callers get instead is the
+     * same "missing" they already get for a folder that has been taken away.
+     */
+    fun findById(id: String): SongRef? = visible.firstOrNull { it.id == id }
+
+    /**
+     * The charts to show. Anything the user removed from the library is still in
+     * [songs] - so that a rescan does not resurrect it - and is not here.
+     */
+    val visible: List<SongRef> get() = songs.filterNot { it.hidden }
+
+    val hiddenCount: Int get() = songs.count { it.hidden }
+
+    /**
+     * Replaces everything known about one source after a rescan, keeping what the
+     * user set.
+     *
+     * This lives here rather than in the repository that calls it because it is
+     * the one piece of the library's bookkeeping where being wrong is silent: a
+     * rescan that quietly forgot a corrected key, a renamed chart or a removed
+     * one would look exactly like a successful rescan. Silent failures belong in
+     * the core, where a test can reach them without a device.
+     *
+     * Matching is by URI rather than by id. An id is derived from the document id
+     * the provider hands out, and a provider is free to hand out a different one
+     * for the same file; the URI is what the app opened last time and what it
+     * will open next time.
+     */
+    fun withSongsFrom(sourceId: String, fresh: List<SongRef>, now: Long): LibraryIndex {
+        val previous = songsFrom(sourceId).associateBy { it.uri }
+        val merged = fresh.map { song ->
+            val old = previous[song.uri] ?: return@map song
+            song.copy(
+                userKeyText = old.userKeyText,
+                userTitle = old.userTitle,
+                hidden = old.hidden,
+                favourite = old.favourite,
+                tags = old.tags,
+            )
+        }
+        return copy(
+            songs = songs.filterNot { it.sourceId == sourceId } + merged,
+            updatedAt = now,
+        )
+    }
 
     /**
      * Finds the local copy of a song described by another device.
@@ -195,11 +289,12 @@ data class LibraryIndex(
      * song - and matching those is the whole point of the fallback.
      */
     fun match(hash: String?, title: String): SongRef? {
+        val candidates = visible
         if (hash != null) {
-            songs.firstOrNull { it.contentHash == hash }?.let { return it }
+            candidates.firstOrNull { it.contentHash == hash }?.let { return it }
         }
         val wanted = title.normaliseForMatching()
-        return songs.firstOrNull { it.bestTitle.normaliseForMatching() == wanted }
+        return candidates.firstOrNull { it.bestTitle.normaliseForMatching() == wanted }
     }
 }
 
