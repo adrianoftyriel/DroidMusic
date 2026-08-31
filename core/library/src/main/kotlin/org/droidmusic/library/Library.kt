@@ -113,8 +113,42 @@ data class SongRef(
      * put it straight back. So it is remembered, and remembered as hidden.
      */
     val hidden: Boolean = false,
+
+    /**
+     * The key the band plays this in, as a number of semitones from the key the
+     * chart is written in. Zero means "as written".
+     *
+     * Remembered on the chart rather than applied once, because a song's key is
+     * a property of the singer, not of the evening. A set list entry carries its
+     * own and wins where it has one - a running order is a decision about one
+     * night - but a chart opened straight out of the library comes up in the key
+     * it is actually played in.
+     */
+    val userTransposeSemitones: Int = 0,
+
+    /**
+     * The capo position the user chose for this chart.
+     *
+     * Deliberately not called `capo`. A ChordPro file can declare `{capo: 2}` of
+     * its own, which lives on [org.droidmusic.music.SongMeta] and means "this
+     * chart was written for a capo" - a statement about the chart. This one is
+     * the player's choice about how to finger it, and confusing the two would
+     * transpose somebody's chart by five frets they never asked for.
+     */
+    val userCapo: Int = 0,
 ) {
     val key: Key? get() = (userKeyText ?: keyText)?.let { Key.parse(it) }
+
+    /**
+     * The key this chart will actually open in, which is what the library should
+     * show. Null when nothing knows what key it is in.
+     */
+    val soundingKey: Key? get() = key?.let { written ->
+        if (userTransposeSemitones == 0) written else written.transposedTo(userTransposeSemitones)
+    }
+
+    /** Whether the user has asked for this chart in anything but its written key. */
+    val isTransposed: Boolean get() = userTransposeSemitones != 0 || userCapo != 0
 
     /**
      * What to call this chart: the user's name for it, then the one the file
@@ -138,6 +172,12 @@ data class SongRef(
      * correction to the file itself, so fixing a typo in a chart's `{title:}`
      * would appear to do nothing.
      */
+    /** Records the key and capo this chart is played in. */
+    fun withTranspose(semitones: Int, capo: Int): SongRef = copy(
+        userTransposeSemitones = Key.foldSemitones(semitones),
+        userCapo = capo.coerceIn(0, MAX_CAPO),
+    )
+
     fun withRename(name: String): SongRef {
         val wanted = name.trim()
         return copy(userTitle = wanted.takeIf { it.isNotEmpty() && it != detectedTitle })
@@ -155,6 +195,9 @@ data class SongRef(
         kind == FileKind.CHORDPRO || kind == FileKind.TEXT || kind == FileKind.DOCX
 
     companion object {
+        /** Frets a capo is offered on. Past this it is not a capo, it is a different guitar. */
+        const val MAX_CAPO = 11
+
         fun kindOf(displayName: String, mimeType: String? = null): FileKind {
             val ext = displayName.substringAfterLast('.', "").lowercase()
             return when {
@@ -270,6 +313,8 @@ data class LibraryIndex(
                 userKeyText = old.userKeyText,
                 userTitle = old.userTitle,
                 hidden = old.hidden,
+                userTransposeSemitones = old.userTransposeSemitones,
+                userCapo = old.userCapo,
                 favourite = old.favourite,
                 tags = old.tags,
             )

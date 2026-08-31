@@ -111,6 +111,49 @@ class TransposeTest {
     }
 }
 
+/**
+ * [Key.transposedTo] and [Key.foldSemitones], which exist so that anything
+ * *offering* a player a key agrees with the key they will actually get.
+ */
+class KeyChoiceTest {
+
+    @Test
+    fun `a key label matches the key the transposer produces`() {
+        // The thing this guards: a control offering "C#" for a chart that then
+        // comes up in Db is a small lie, told once per pill.
+        for (fromText in listOf("C", "D", "Eb", "E", "F", "G", "A", "Bb", "B", "Am", "F#m")) {
+            val from = Key.parse(fromText)!!
+            for (semitones in -5..6) {
+                val offered = from.transposedTo(semitones)
+                val actual = Transposer.transpose(
+                    ChordProParser.parse("{key: $fromText}\n[$fromText]x"),
+                    TransposeRequest(semitones = semitones),
+                ).soundingKey
+                assertEquals("$fromText by $semitones", actual, offered)
+            }
+        }
+    }
+
+    @Test
+    fun `a fold leaves every offered step alone and brings the rest home`() {
+        for (step in -5..6) {
+            assertEquals("$step", step, Key.foldSemitones(step))
+        }
+        assertEquals(0, Key.foldSemitones(12))
+        assertEquals(-5, Key.foldSemitones(7))
+        assertEquals(1, Key.foldSemitones(13))
+        assertEquals(6, Key.foldSemitones(-6))
+    }
+
+    @Test
+    fun `the twelve offered steps reach twelve different keys`() {
+        // Thirteen pills for twelve keys is how one of them ends up unreachable.
+        val from = Key.parse("D")!!
+        val reached = (-5..6).map { from.transposedTo(it).pitchClass }
+        assertEquals(12, reached.toSet().size)
+    }
+}
+
 class TabTransposerTest {
 
     @Test

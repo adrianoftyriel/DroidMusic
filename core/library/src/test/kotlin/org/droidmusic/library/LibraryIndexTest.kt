@@ -1,5 +1,6 @@
 package org.droidmusic.library
 
+import org.droidmusic.music.Key
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -75,6 +76,74 @@ class LibraryIndexTest {
         assertEquals("Everlong", song("a").withRename("  Everlong  ").userTitle)
     }
 
+    // ---- The key a chart is played in -------------------------------------
+
+    @Test
+    fun `a chart with no key chosen sounds in the key it was written in`() {
+        val song = song("a").copy(keyText = "D")
+        assertEquals(Key.parse("D"), song.soundingKey)
+        assertTrue(!song.isTransposed)
+    }
+
+    @Test
+    fun `choosing a key changes what the chart sounds in`() {
+        val song = song("a").copy(keyText = "D").withTranspose(2, 0)
+        assertEquals(Key.parse("E"), song.soundingKey)
+        assertTrue(song.isTransposed)
+    }
+
+    @Test
+    fun `a capo alone still counts as transposed`() {
+        // Nothing sounds different, but the fingering does, and a row that
+        // claimed the chart was untouched would be wrong about the thing the
+        // player is looking at.
+        val song = song("a").copy(keyText = "D").withTranspose(0, 3)
+        assertEquals(Key.parse("D"), song.soundingKey)
+        assertTrue(song.isTransposed)
+    }
+
+    @Test
+    fun `a chart whose key is unknown has no sounding key to show`() {
+        assertNull(song("a").withTranspose(2, 0).soundingKey)
+    }
+
+    @Test
+    fun `semitones fold onto the twelve keys that exist`() {
+        // Tapping up past the top comes back round rather than accumulating into
+        // a number nothing can be displayed for.
+        assertEquals(-5, song("a").withTranspose(7, 0).userTransposeSemitones)
+        assertEquals(0, song("a").withTranspose(12, 0).userTransposeSemitones)
+        assertEquals(-1, song("a").withTranspose(-13, 0).userTransposeSemitones)
+
+        // A tritone is one key, not two. Both ways round land on the same
+        // choice, so the row can offer it once and light it up when picked.
+        assertEquals(6, song("a").withTranspose(6, 0).userTransposeSemitones)
+        assertEquals(6, song("a").withTranspose(-6, 0).userTransposeSemitones)
+    }
+
+    @Test
+    fun `every offered step is a step the fold leaves alone`() {
+        // The row offers -5..6; if the fold moved any of them the pill a player
+        // tapped would not be the pill that lit up.
+        for (step in -5..6) {
+            assertEquals("$step", step, song("a").withTranspose(step, 0).userTransposeSemitones)
+        }
+    }
+
+    @Test
+    fun `a capo is clamped to frets that exist`() {
+        assertEquals(0, song("a").withTranspose(0, -3).userCapo)
+        assertEquals(SongRef.MAX_CAPO, song("a").withTranspose(0, 40).userCapo)
+    }
+
+    @Test
+    fun `the user key still wins over the detected one when transposing`() {
+        // A chart the detector read as C, corrected by hand to Am, transposed up
+        // two, sounds in Bm - not D.
+        val song = song("a").copy(keyText = "C", userKeyText = "Am").withTranspose(2, 0)
+        assertEquals(Key.parse("Bm"), song.soundingKey)
+    }
+
     // ---- Removing a chart from the library --------------------------------
 
     @Test
@@ -114,6 +183,8 @@ class LibraryIndexTest {
             userKeyText = "Db",
             userTitle = "Everlong (capo 2)",
             hidden = true,
+            userTransposeSemitones = -2,
+            userCapo = 4,
             favourite = true,
             tags = listOf("rock"),
         )
@@ -126,6 +197,8 @@ class LibraryIndexTest {
         assertEquals("Db", after.userKeyText)
         assertEquals("Everlong (capo 2)", after.userTitle)
         assertTrue(after.hidden)
+        assertEquals(-2, after.userTransposeSemitones)
+        assertEquals(4, after.userCapo)
         assertTrue(after.favourite)
         assertEquals(listOf("rock"), after.tags)
         assertEquals(99L, index.withSongsFrom("folder", listOf(fresh), 99L).updatedAt)

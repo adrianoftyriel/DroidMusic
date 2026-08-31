@@ -150,11 +150,17 @@ class ViewerController(
             page = 0
             topRowIndex = 0
 
-            // Per-song settings from the set list: the singer's key for tonight,
-            // not the key the file was written in.
+            // Which key to open in, most specific first: what the set list says
+            // for tonight, then the key the band always plays this song in, then
+            // the key the file was written in.
+            //
+            // A set list entry wins even when it says zero. That is not a
+            // fallthrough to the song's key but an entry that means "as
+            // written", and entries are seeded from the song's key when they are
+            // created, so a zero there was chosen rather than defaulted.
             val entry = setlist?.entries?.getOrNull(setlistIndex)
-            transposeSemitones = entry?.transposeSemitones ?: 0
-            capo = entry?.capo ?: 0
+            transposeSemitones = entry?.transposeSemitones ?: ref.userTransposeSemitones
+            capo = entry?.capo ?: ref.userCapo
 
             (opened as? ChartPageSource)?.let { chart ->
                 // The chart itself is open and readable by this point. What is
@@ -267,7 +273,7 @@ class ViewerController(
      * not a field being assigned.
      */
     fun chooseTranspose(semitones: Int) {
-        transposeSemitones = ((semitones + 6).mod(12)) - 6
+        transposeSemitones = Key.foldSemitones(semitones)
         applyTranspose()
     }
 

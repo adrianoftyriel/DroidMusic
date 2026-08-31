@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.droidmusic.app.data.DocumentSources
+import org.droidmusic.app.ui.common.ChoicePill
 import org.droidmusic.app.ui.common.EmptyState
 import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.HeaderAction
@@ -59,6 +60,7 @@ import org.droidmusic.library.LibraryIndex
 import org.droidmusic.library.SongRef
 import org.droidmusic.library.SourceKind
 import org.droidmusic.library.SourceRef
+import org.droidmusic.music.Key
 
 /**
  * The library: every chart the app can reach, from every folder it has been
@@ -89,6 +91,7 @@ fun LibraryScreen(
     var showSources by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<SongRef?>(null) }
     var deleting by remember { mutableStateOf<SongRef?>(null) }
+    var transposing by remember { mutableStateOf<SongRef?>(null) }
 
     val addFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -122,6 +125,17 @@ fun LibraryScreen(
     // listed.
     val songs = remember(index, query, activeFilter) {
         controller.filter(index.visible, query, activeFilter)
+    }
+
+    transposing?.let { song ->
+        TransposeDialog(
+            song = song,
+            onConfirm = { semitones, capo ->
+                controller.setTranspose(song, semitones, capo)
+                transposing = null
+            },
+            onDismiss = { transposing = null },
+        )
     }
 
     renaming?.let { song ->
@@ -216,13 +230,13 @@ fun LibraryScreen(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                org.droidmusic.app.ui.common.ChoicePill(
+                ChoicePill(
                     text = "All",
                     selected = activeFilter == null,
                     onClick = { sourceFilter = null },
                 )
                 for (source in index.sources) {
-                    org.droidmusic.app.ui.common.ChoicePill(
+                    ChoicePill(
                         text = source.label,
                         selected = activeFilter == source.id,
                         onClick = { sourceFilter = source.id },
@@ -276,6 +290,7 @@ fun LibraryScreen(
                         canDeleteFile = { controller.canDeleteFile(song) },
                         onClick = { onOpenSong(song) },
                         onAddToSetlist = { onAddSongToSetlist(song) },
+                        onTranspose = { transposing = song },
                         onRename = { renaming = song },
                         onRemove = { controller.removeFromLibrary(song) },
                         onDeleteFile = { deleting = song },
@@ -455,6 +470,100 @@ private fun ConfirmRemoveDialog(
 }
 
 /**
+ * Choosing the key a chart is played in.
+ *
+ * The same two rows the viewer offers - every key rather than up and down by a
+ * semitone, because a singer asks for a key by name and not by an interval from
+ * wherever the chart happened to be written - except that here the choice is
+ * remembered rather than lasting until the chart is closed.
+ *
+ * There is no separate reset. The pill for the chart's own key is the reset, and
+ * it is where the selection already is for a chart nobody has changed.
+ */
+@Composable
+private fun TransposeDialog(
+    song: SongRef,
+    onConfirm: (Int, Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var semitones by remember(song.id) { mutableStateOf(song.userTransposeSemitones) }
+    var capo by remember(song.id) { mutableStateOf(song.userCapo) }
+    val written = song.key
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Transpose") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    written?.let { "Written in ${it.display()}." }
+                        ?: "The key of this chart could not be worked out, so these are " +
+                        "semitones from however it was written.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Text("Key", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (step in -5..6) {
+                        ChoicePill(
+                            text = written?.transposedTo(step)?.toUnicode() ?: signed(step),
+                            selected = semitones == step,
+                            onClick = { semitones = step },
+                        )
+                    }
+                }
+
+                Text("Capo", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (fret in 0..7) {
+                        ChoicePill(
+                            text = if (fret == 0) "off" else "$fret",
+                            selected = capo == fret,
+                            onClick = { capo = fret },
+                        )
+                    }
+                }
+
+                Text(
+                    transposeSummary(written, semitones, capo),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(semitones, capo) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun signed(step: Int): String = if (step > 0) "+$step" else "$step"
+
+/**
+ * What the choice actually means, in the terms a player would use: what it will
+ * sound like, and - once a capo is on - what their hands will be doing, which is
+ * a different key and the one they need to read.
+ */
+private fun transposeSummary(written: Key?, semitones: Int, capo: Int): String {
+    if (semitones == 0 && capo == 0) return "Opens in the key it was written in."
+    val sounding = written?.transposedTo(semitones)?.toUnicode()
+        ?: "${signed(semitones)} semitones"
+    if (capo == 0) return "Opens sounding $sounding, from now on."
+    val played = written?.transposedTo(semitones - capo)?.toUnicode()
+    return if (played == null) {
+        "Opens sounding $sounding with a capo at $capo, from now on."
+    } else {
+        "Opens sounding $sounding - capo $capo, fingered in $played - from now on."
+    }
+}
+
+/**
  * Renaming a chart, for DroidMusic's purposes.
  *
  * The dialog says plainly that the file is not being renamed, because the
@@ -598,6 +707,7 @@ private fun SongRow(
     canDeleteFile: () -> Boolean,
     onClick: () -> Unit,
     onAddToSetlist: () -> Unit,
+    onTranspose: () -> Unit,
     onRename: () -> Unit,
     onRemove: () -> Unit,
     onDeleteFile: () -> Unit,
@@ -618,10 +728,17 @@ private fun SongRow(
         SongMenu(
             expanded = menuOpen,
             canDeleteFile = canDelete,
+            // A PDF is a picture of a page. There is nothing in one to rewrite,
+            // so it is not offered a key.
+            canTranspose = song.isTransposable,
             onDismiss = { menuOpen = false },
             onAddToSetlist = {
                 menuOpen = false
                 onAddToSetlist()
+            },
+            onTranspose = {
+                menuOpen = false
+                onTranspose()
             },
             onRename = {
                 menuOpen = false
@@ -644,14 +761,19 @@ private fun SongRow(
 private fun SongMenu(
     expanded: Boolean,
     canDeleteFile: Boolean,
+    canTranspose: Boolean,
     onDismiss: () -> Unit,
     onAddToSetlist: () -> Unit,
+    onTranspose: () -> Unit,
     onRename: () -> Unit,
     onRemove: () -> Unit,
     onDeleteFile: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         DropdownMenuItem(text = { Text("Add to a set list") }, onClick = onAddToSetlist)
+        if (canTranspose) {
+            DropdownMenuItem(text = { Text("Transpose\u2026") }, onClick = onTranspose)
+        }
         DropdownMenuItem(text = { Text("Rename\u2026") }, onClick = onRename)
         DropdownMenuItem(text = { Text("Remove from library") }, onClick = onRemove)
         if (canDeleteFile) {
@@ -696,6 +818,10 @@ private fun SongRowBody(
                 song.artist,
                 sourceLabel,
                 song.kind.name.lowercase(),
+                // Only when it is not the obvious. A chart played as written has
+                // nothing to say here, and a row that spells out "capo 0" for
+                // four hundred charts is four hundred rows of noise.
+                song.userCapo.takeIf { it > 0 }?.let { "capo $it" },
             ).joinToString(" - ")
             Text(
                 detail,
@@ -704,7 +830,20 @@ private fun SongRowBody(
                 maxLines = 1,
             )
         }
-        song.key?.let { Pill(it.toUnicode()) }
+        // The key the chart will open in, not the key it was written in. Those
+        // are the same thing until somebody chooses otherwise, and once they
+        // have, the written key is not the useful one to put in front of them.
+        song.soundingKey?.let { sounding ->
+            if (song.isTransposed) {
+                Pill(
+                    sounding.toUnicode(),
+                    background = MaterialTheme.colorScheme.primary,
+                    foreground = MaterialTheme.colorScheme.onPrimary,
+                )
+            } else {
+                Pill(sounding.toUnicode())
+            }
+        }
         Box(Modifier.padding(start = 8.dp)) {
             if (song.isTransposable) {
                 Pill(

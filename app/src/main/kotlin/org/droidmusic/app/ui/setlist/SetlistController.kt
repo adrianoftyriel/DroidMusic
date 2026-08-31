@@ -86,6 +86,12 @@ class SetlistController(
         title = song.bestTitle,
         contentHash = song.contentHash,
         artist = song.artist,
+        // Seeded from the key the band plays this song in, not from the key the
+        // file was written in. Filing a song into tonight's running order is not
+        // the moment to silently put it back into the writer's key, and it means
+        // the zero an entry may later hold is one somebody chose.
+        transposeSemitones = song.userTransposeSemitones,
+        capo = song.userCapo,
     )
 
     fun move(setlist: Setlist, from: Int, to: Int) = save(setlist.moved(from, to))

@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 273 tests that run on a plain JVM; the
+band-sync and update layers are covered by 284 tests that run on a plain JVM; the
 app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -89,9 +89,25 @@ Hold a chart in the list and it offers what can be done with it.
 | | |
 |---|---|
 | **Add to a set list** | Files it into tonight's running order without leaving the library. |
+| **Transpose** | Sets the key the song is played in, for good. |
 | **Rename** | Changes what DroidMusic calls it. |
 | **Remove from library** | Stops listing it. The file is not touched. |
 | **Delete file** | Deletes it, and only appears when that is actually possible. |
+
+**Transposing from here is remembered.** The viewer has always been able to
+transpose a chart, but only until you closed it. A key set from this menu sticks:
+the chart opens in it every time, the library row shows the key it will actually
+sound in rather than the one it was written in, and a capo is remembered
+alongside. The file is untouched - the chords are rewritten as it is drawn, the
+same as they always were.
+
+A set list entry still carries its own key and wins where it has one, because a
+running order is a decision about one particular night. Adding a song to a set
+list starts that entry from the song's key rather than from the written one, so
+filing a song does not quietly put it back into the writer's key.
+
+Charts that cannot be transposed - PDFs, photographs of a page - are not offered
+the option. There is nothing in a picture to rewrite.
 
 **Renaming changes the name here and nowhere else.** A chart's title normally
 comes from inside the file - `{title:}` in a ChordPro, the filename for a PDF -

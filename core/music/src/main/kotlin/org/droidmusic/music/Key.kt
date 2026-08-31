@@ -37,6 +37,19 @@ data class Key(val tonic: Note, val mode: Mode) {
 
     fun transpose(interval: Interval): Key = Key(tonic.transpose(interval), mode)
 
+    /**
+     * The key this one becomes [semitones] away, spelled the way [Transposer]
+     * will actually spell it.
+     *
+     * The spelling preference is taken from this key rather than left at the
+     * default, because that is what the transposer does: a chart in E goes up a
+     * semitone to F, and a chart in Eb goes up to E, and picking the other
+     * spelling in either case gives a key with more accidentals than the music
+     * needs. Anything showing a player which key they are choosing has to agree
+     * with the key they will get.
+     */
+    fun transposedTo(semitones: Int): Key = bestSpelling(this, semitones, fifths > 0)
+
     /** The scale degrees of this key as pitch classes, tonic first. */
     fun scalePitchClasses(): IntArray {
         val steps = if (mode == Mode.MAJOR) MAJOR_STEPS else MINOR_STEPS
@@ -51,6 +64,21 @@ data class Key(val tonic: Note, val mode: Mode) {
         private val LETTER_FIFTHS = intArrayOf(0, 2, 4, -1, 1, 3, 5) // C D E F G A B
 
         fun fifthsOf(note: Note): Int = LETTER_FIFTHS[note.letter] + 7 * note.alter
+
+        /**
+         * Folds a transposition onto the twelve keys that exist, as -5..+6.
+         *
+         * There are twelve distinct keys, so an offer of -6..+6 is thirteen
+         * choices for twelve destinations and two of them are the same place: a
+         * tritone up and a tritone down are the same key. Offering both means one
+         * of them can be picked and the other lights up, which looks like a bug
+         * because it is one. Twelve is the honest number, and +6 is the one kept
+         * because "up a tritone" is how the interval is spoken.
+         *
+         * Also what keeps a player who taps up repeatedly from ending at +14,
+         * which is a real key written as a number nothing will display.
+         */
+        fun foldSemitones(semitones: Int): Int = ((semitones + 5).mod(12)) - 5
 
         fun parse(text: String): Key? {
             val s = text.trim()

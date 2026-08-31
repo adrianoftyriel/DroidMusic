@@ -19,7 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.droidmusic.app.ui.common.ChoicePill
 import org.droidmusic.app.ui.common.Pill
-import org.droidmusic.music.Key
 
 /**
  * The controls that slide over the chart when the player asks for them.
@@ -178,8 +177,12 @@ private fun TransposeControls(controller: ViewerController, unicodeAccidentals: 
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             val from = result.fromKey
-            for (semitones in -6..6) {
-                val target = from?.let { Key.bestSpelling(it, semitones) }
+            for (semitones in -5..6) {
+                // Spelled the way the transposer will spell it, not the way
+                // the default would. A pill offering "C#" for a chart that
+                // then comes up in Db is a small lie told twelve times a
+                // screen.
+                val target = from?.transposedTo(semitones)
                 ChoicePill(
                     text = when {
                         target == null -> "$semitones"

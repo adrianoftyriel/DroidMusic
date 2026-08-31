@@ -446,6 +446,18 @@ class LibraryController(
     }
 
     /**
+     * Remembers the key this chart is played in, so it opens in that key rather
+     * than the one it was written in.
+     *
+     * Only meaningful for a chart the app can rewrite - see
+     * [SongRef.isTransposable] - which is why the menu does not offer it for a
+     * PDF. There is nothing in a picture of a page to transpose.
+     */
+    fun setTranspose(song: SongRef, semitones: Int, capo: Int) {
+        scope.launch { repository.updateSong(song.id) { it.withTranspose(semitones, capo) } }
+    }
+
+    /**
      * Stops listing a chart, without touching the file.
      *
      * Held in [removed] afterwards so the screen can offer to undo it. That
