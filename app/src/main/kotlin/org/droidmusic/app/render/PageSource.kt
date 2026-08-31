@@ -347,6 +347,32 @@ class ChartPageSource(
         const val DEFAULT_LINES_PER_PAGE = 30
 
         /**
+         * The exception, and everything underneath it.
+         *
+         * Stopping at the top of the chain can say nothing at all. A static
+         * initialiser that throws surfaces as ExceptionInInitializerError with
+         * no message of its own and the real fault as its cause, so a report
+         * that does not follow the chain names the messenger. The full class
+         * names are used rather than the short ones because in a release build
+         * they are obfuscated, and the package is half of what makes an
+         * obfuscated name findable in the mapping file.
+         */
+        private fun describe(error: Throwable): String {
+            val chain = mutableListOf<String>()
+            var current: Throwable? = error
+            while (current != null && chain.size < MAX_CAUSE_DEPTH) {
+                val step = current
+                chain += step::class.java.name + (step.message?.let { ": $it" } ?: "")
+                current = step.cause?.takeIf { it !== step }
+            }
+            return chain.joinToString(", caused by ")
+        }
+
+        /** Enough to reach the real fault under a wrapper or two. */
+        private const val MAX_CAUSE_DEPTH = 4
+
+
+        /**
          * [kind] is passed rather than sniffed because a Word document has to be
          * unzipped before there is any text to sniff. Everything after that point
          * is identical for every text chart - see DocumentSources.readChartText.
@@ -381,8 +407,7 @@ class ChartPageSource(
                 onFailure = { failure ->
                     OpenResult.Failed(
                         "It was read - ${text.length} characters - but could not be laid " +
-                            "out as a chart. ${failure::class.java.simpleName}" +
-                            (failure.message?.let { ": $it" } ?: "") + ".",
+                            "out as a chart. " + describe(failure),
                     )
                 },
             )

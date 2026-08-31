@@ -330,6 +330,19 @@ jobs:
             -exec cp {} staging/mapping-release.txt \; || true
           ls -la staging
 
+          # The class mapping for our own code and the Kotlin runtime, printed
+          # into the log rather than only shipped as a file. An obfuscated name
+          # in a crash report ("NoClassDefFoundError: t2.l") is unreadable
+          # without it, and a build log can be read from anywhere the artifact
+          # cannot. androidx and Compose are left out: they are the bulk of the
+          # mapping and have never been the thing in question.
+          mapping=$(find app/build/outputs -name 'mapping.txt' | head -1)
+          if [ -n "$mapping" ]; then
+            echo "----- class mapping (org.droidmusic, kotlin, kotlinx) -----"
+            grep -E '^(org\.droidmusic|kotlin|kotlinx)[^ ]* -> ' "$mapping" || true
+            echo "----- end class mapping -----"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: DroidMusic-apk
@@ -345,6 +358,7 @@ jobs:
           path: |
             app/build/reports
             app/build/test-results
+            app/build/outputs/mapping/release/mapping.txt
           retention-days: 14
           if-no-files-found: ignore
 
