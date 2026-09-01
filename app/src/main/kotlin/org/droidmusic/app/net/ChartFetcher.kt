@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
-import org.droidmusic.library.ContentHash
 import org.droidmusic.library.SongRef
 import org.droidmusic.session.ChartFetch
 import org.droidmusic.session.ChartFetchHeader
@@ -166,22 +165,45 @@ class ChartFetcher(
     }
 
     /**
-     * Checks the bytes against the offer and, only then, files them.
+     * Checks what arrived against the offer and, only then, files it.
      *
-     * The check is what stops a truncated or substituted transfer becoming a
-     * chart in somebody's library. What it proves is that the file matches the
-     * one that was described - on a protocol with no identity it cannot prove
-     * the describer was honest, which is why the caps and the rebuilt filename
-     * in [ChartShare] carry the rest of the weight.
+     * The hash is **not** computed here. It is computed by handing the file to
+     * this device's own indexer and reading back what it called it, which is the
+     * only way the two ends can be sure of agreeing.
+     *
+     * That is not fastidiousness, it is the bug this method shipped with. The
+     * library hashes a chart in one of two ways depending on its kind - a text
+     * chart from the characters it parses out of it, a PDF from its first
+     * megabyte and its length - and this code reimplemented the second rule and
+     * applied it to everything. Every ChordPro chart therefore compared a hash
+     * of its text against a hash of its bytes, which cannot match, and every
+     * transfer was rejected as corrupt while being perfectly intact.
+     *
+     * Nothing is copied anywhere until the check has passed. The part file is
+     * what gets indexed, so a chart that fails never reaches the directory the
+     * library reads.
      */
     private suspend fun install(offer: ChartOffer, partial: File): Outcome {
-        val hash = runCatching {
-            partial.inputStream().use { ContentHash.of(it, partial.length()) }
-        }.getOrNull()
+        val probe = SongRef(
+            id = "probe",
+            sourceId = DocumentSources.MANAGED_SOURCE_ID,
+            uri = Uri.fromFile(partial).toString(),
+            displayName = ChartShare.storedName(offer),
+            kind = offer.kind,
+            sizeBytes = partial.length(),
+        )
+        // parseContents = true is required: without it the indexer hands the song
+        // straight back and there is no hash to check against anything.
+        val indexed = DocumentSources.enrich(context, listOf(probe), parseContents = true)
+            .firstOrNull()
 
-        if (!ChartShare.matchesOffer(offer, hash, partial.length())) {
+        if (!ChartShare.matchesOffer(offer, indexed?.contentHash, partial.length())) {
             partial.delete()
-            return Outcome.Failed("That chart did not arrive intact", partial = false)
+            return Outcome.Failed(
+                "That chart did not match what the leader offered. If this keeps " +
+                    "happening, the leader's library may need a rescan.",
+                partial = false,
+            )
         }
 
         val directory = File(context.filesDir, MANAGED_DIRECTORY).apply { mkdirs() }
@@ -191,6 +213,9 @@ class ChartFetcher(
         }
         partial.delete()
 
+        // The metadata comes from the indexer's reading of the file rather than
+        // from the offer: the title on an offer is what the *leader* calls the
+        // chart, which may be a rename only they made.
         val stored = SongRef(
             id = DocumentSources.stableId(DocumentSources.MANAGED_SOURCE_ID, target.name),
             sourceId = DocumentSources.MANAGED_SOURCE_ID,
@@ -199,17 +224,14 @@ class ChartFetcher(
             kind = offer.kind,
             sizeBytes = target.length(),
             modifiedAt = target.lastModified(),
-            contentHash = offer.contentHash,
+            contentHash = indexed?.contentHash,
+            title = indexed?.title,
+            artist = indexed?.artist,
+            keyText = indexed?.keyText,
         )
 
-        // Read by this device's own parser rather than trusting the sender's
-        // description of what is in the file. The title on the offer is what the
-        // *leader* calls the chart, which may be a rename only they made.
-        val indexed = DocumentSources.enrich(context, listOf(stored), parseContents = true)
-            .firstOrNull() ?: stored
-
-        fileManaged(indexed)
-        return Outcome.Installed(indexed)
+        fileManaged(stored)
+        return Outcome.Installed(stored)
     }
 
     /** Adds a fetched chart to the managed source, making that source if it is not there. */

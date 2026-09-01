@@ -93,6 +93,7 @@ class SessionCoordinator(
             discovery = discovery,
             library = library,
             chartServer = ChartServer(scope, context, library),
+            context = context,
         )
         server = newServer
         _role.value = SessionRole.LEADER

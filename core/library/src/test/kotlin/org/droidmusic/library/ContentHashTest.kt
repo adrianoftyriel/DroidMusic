@@ -75,6 +75,22 @@ class ContentHashTest {
     }
 
     @Test
+    fun `the two rules are different rules, and mixing them up cannot match`() {
+        // The trap, pinned. A text chart is hashed from its characters and a PDF
+        // from its bytes and length, and the two answers for the same file are
+        // not the same answer. Chart sharing reimplemented the second rule and
+        // applied it to everything, so every ChordPro transfer was checked
+        // against a number nothing could reproduce and rejected as corrupt.
+        //
+        // Anything that needs a chart's hash asks DocumentSources.enrich, which
+        // is the one place that knows which rule a kind gets.
+        val chart = "{title: Everlong}\n[D]Hello".toByteArray()
+        val fromText = ContentHash.of(chart)
+        val fromBytes = ContentHash.of(ByteArrayInputStream(chart), chart.size.toLong())
+        assertNotEquals(fromText, fromBytes)
+    }
+
+    @Test
     fun `hashing bytes in hand agrees with itself`() {
         assertEquals(ContentHash.of("abc".toByteArray()), ContentHash.of("abc".toByteArray()))
         assertNotEquals(ContentHash.of("abc".toByteArray()), ContentHash.of("abd".toByteArray()))

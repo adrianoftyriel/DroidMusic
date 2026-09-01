@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.library.Setlist
 import org.droidmusic.session.ChartShare
@@ -60,6 +61,8 @@ class SessionServer(
      */
     private val library: LibraryRepository? = null,
     private val chartServer: ChartServer? = null,
+    /** Needed only to re-read a chart when offering it; see [onWanted]. */
+    private val context: android.content.Context? = null,
 ) {
     private val connections = ConcurrentHashMap<String, Connection>()
     private var serverSocket: ServerSocket? = null
@@ -204,12 +207,45 @@ class SessionServer(
      * a file at anybody. See [ChartShare].
      */
     private fun onWanted(wanted: ChartsWanted, connection: Connection) {
-        val index = library?.index?.value ?: return
+        val repository = library ?: return
         if ((chartServer?.port?.value ?: 0) == 0) return
 
-        val (next, seq) = LeaderSession.nextSeq(_state.value)
-        _state.value = next
-        send(connection, ChartsOffered(seq, ChartShare.offers(wanted.wanted, index)))
+        scope.launch(Dispatchers.IO) {
+            val index = repository.index.value
+            val candidates = ChartShare.offers(wanted.wanted, index)
+            if (candidates.isEmpty()) return@launch
+
+            // Each chart is re-read before it is offered, and what this leader
+            // knows about it is brought up to date.
+            //
+            // Not belt and braces. A content hash sitting in an index was
+            // computed by whatever version of the app last scanned that folder,
+            // and the rule changed - it used to leave the file's length out for
+            // anything past a megabyte. Offering a hash this leader's own code
+            // would no longer produce means the follower checks the bytes
+            // against a number nothing can reproduce, and every large chart
+            // fails as corrupt. Refreshing here fixes that for the charts it
+            // matters for, and writing it back means the set list matching that
+            // depends on the same hash stops being wrong too.
+            val offers = candidates.mapNotNull { offer ->
+                val song = index.songs.firstOrNull { it.contentHash == offer.contentHash }
+                    ?: return@mapNotNull offer
+                val fresh = context
+                    ?.let { DocumentSources.enrich(it, listOf(song), parseContents = true) }
+                    ?.firstOrNull()
+                    ?: return@mapNotNull offer
+                val hash = fresh.contentHash ?: return@mapNotNull null
+
+                if (hash != song.contentHash) {
+                    repository.updateSong(song.id) { it.copy(contentHash = hash) }
+                }
+                offer.copy(contentHash = hash, sizeBytes = fresh.sizeBytes)
+            }
+
+            val (next, seq) = LeaderSession.nextSeq(_state.value)
+            _state.value = next
+            send(connection, ChartsOffered(seq, offers))
+        }
     }
 
     /** Moves the session to a new position and tells everyone. */

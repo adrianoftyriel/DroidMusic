@@ -19,6 +19,19 @@ import java.security.MessageDigest
  * this exists to hold a test against: the length being appended was the number
  * of bytes *hashed*, which for anything past a megabyte is the same constant
  * every time.
+ *
+ * **Which rule a chart gets depends on what kind of chart it is, and this object
+ * holds both without choosing between them.** A text chart - ChordPro, `.txt`,
+ * `.docx` - is hashed from the characters parsed out of it, by [of]`(ByteArray)`.
+ * A PDF or an image is hashed from its bytes and its length, by
+ * [of]`(InputStream, Long)`. For a `.docx` the two are not even reading the same
+ * thing: one hashes the extracted text, the other would hash a zip.
+ *
+ * `DocumentSources.enrich` is the single place that decides, and anything that
+ * needs a chart's hash asks it rather than picking a rule here. Reimplementing
+ * one of these and applying it to every kind is a bug that shipped: chart sharing
+ * compared a hash of a ChordPro's text against a hash of its bytes and rejected
+ * every transfer as corrupt while the files arrived perfectly.
  */
 object ContentHash {
 
