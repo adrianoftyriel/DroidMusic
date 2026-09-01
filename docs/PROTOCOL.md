@@ -34,6 +34,12 @@ spinning forever.
 
 One message, one line, UTF-8, terminated by `\n`.
 
+Each connection has **one writer and one queue**. Sending used to launch a task
+per message, which meant two announcements could reach the socket in either
+order and a set list could arrive after the position that referred to it —
+throwing away the one guarantee a stream protocol gives you for free. The queue
+is unbounded and never blocks its caller, because the caller is a page turn.
+
 Newline framing over a length prefix, because it can be read by anything —
 including a person with `netcat` at a soundcheck, which is worth more than
 saving bytes when a follower is not turning pages and there are ten minutes
@@ -181,6 +187,14 @@ goes quiet, sometimes for minutes. Without a heartbeat a follower cannot tell
 "the leader has not turned a page" from "the leader is gone", and those need
 opposite responses.
 
+**Any line from a follower counts as a sign of life, and `pong` is usually the
+only one there is.** A follower that is quietly following sends no `status` for
+minutes together, so a leader that refreshed its timer only on the messages
+carrying news evicted the entire band twenty seconds into the first song — while
+the sockets were open and the pages were turning. The follower list is the
+leader's whole view of the room, so it is refreshed on every inbound line
+whatever it says.
+
 ### `status` — follower to leader, advisory
 
 ```json
@@ -312,6 +326,21 @@ the rest of the night.
 The reconnect runs entirely in the background. **It never blocks the viewer** —
 which is the property that made this feature worth building rather than a nice
 idea.
+
+**The address is looked up again on every retry.** The leader binds an ephemeral
+port, so a leader whose app restarted is listening on a different one, and a
+phone that dropped off the wifi and came back may have a different address as
+well. A follower retrying the address it first saw retries it all night, which
+on stage reads as "it just stopped following". Each retry therefore asks mDNS
+where that session name is now, and falls back to the address it already has
+when nothing answers — which is the right answer on a network that blocks
+multicast, where that address is all there ever was.
+
+**The backoff resets only after a connection that lasted.** A connection that
+was accepted and closed a moment later — a refused protocol version, a socket
+dying at the far end — used to count as success and reset the timer, producing
+an unpaced retry loop against a leader that could not talk to this device
+anyway. Five seconds is the bar.
 
 ---
 

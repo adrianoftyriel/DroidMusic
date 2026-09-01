@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.droidmusic.app.ui.common.ChoicePill
 import org.droidmusic.app.ui.common.Pill
+import org.droidmusic.music.TransposeResult
 
 /**
  * The menu that slides over the chart when the top of the screen is tapped.
@@ -54,7 +55,10 @@ fun ViewerControls(
     modifier: Modifier = Modifier,
 ) {
     val song = controller.song
-    val chart = controller.chartSource
+    // The transposition as the controller publishes it, not as the page source
+    // holds it: the source rewrites its rows in place, so a menu reading from it
+    // shows the key the chart opened in for as long as it stays open.
+    val chart = controller.transposed
     val analysis = controller.analysis
 
     Column(
@@ -115,7 +119,7 @@ fun ViewerControls(
         // page; there is nothing in it the app could rewrite, and offering the
         // control anyway would be a promise the app cannot keep.
         if (chart != null) {
-            TransposeControls(controller, unicodeAccidentals)
+            TransposeControls(controller, chart, unicodeAccidentals)
 
             if (analysis != null) {
                 AnalysisSummary(analysis, controller, unicodeAccidentals)
@@ -261,10 +265,11 @@ private const val MIN_FONT_SCALE = 0.6f
 private const val MAX_FONT_SCALE = 2.2f
 
 @Composable
-private fun TransposeControls(controller: ViewerController, unicodeAccidentals: Boolean) {
-    val chart = controller.chartSource ?: return
-    val result = chart.current
-
+private fun TransposeControls(
+    controller: ViewerController,
+    result: TransposeResult,
+    unicodeAccidentals: Boolean,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

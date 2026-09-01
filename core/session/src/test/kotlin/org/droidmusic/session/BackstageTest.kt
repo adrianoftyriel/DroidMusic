@@ -280,6 +280,28 @@ class LeaderReportTest {
         assertTrue(state.reports.isEmpty())
     }
 
+    // The bug this guards against emptied the leader's screen twenty seconds
+    // into every set: a follower that is quietly following sends no news, only
+    // heartbeat replies, and those were not counted as a sign of life.
+    @Test
+    fun `a heartbeat reply keeps a quiet follower in the list`() {
+        var state = LeaderSession.withFollower(base, Hello(deviceName = "A", deviceId = "d1"), now = 0)
+
+        state = LeaderSession.seen(state, "d1", now = 15_000)
+        state = LeaderSession.evictStale(state, now = 19_000)
+        assertEquals(listOf("d1"), state.followers.map { it.deviceId })
+
+        // And still goes when it genuinely stops answering.
+        state = LeaderSession.evictStale(state, now = 15_000 + LeaderSession.FOLLOWER_TIMEOUT_MS + 1)
+        assertTrue(state.followers.isEmpty())
+    }
+
+    @Test
+    fun `hearing from a device that is not in the session changes nothing`() {
+        val state = LeaderSession.withFollower(base, Hello(deviceName = "A", deviceId = "d1"), now = 0)
+        assertEquals(state, LeaderSession.seen(state, "someone-else", now = 5_000))
+    }
+
     @Test
     fun `the leader can see who has not answered`() {
         var state = LeaderSession.withFollower(base, Hello(deviceName = "A", deviceId = "d1"), now = 0)

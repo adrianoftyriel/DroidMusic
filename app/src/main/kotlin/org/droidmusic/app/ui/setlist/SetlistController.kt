@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.droidmusic.app.data.DocumentSources
+import org.droidmusic.app.diag.Area
+import org.droidmusic.app.diag.Diagnostics
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.data.SettingsRepository
 import org.droidmusic.app.data.SetlistBook
@@ -44,6 +46,18 @@ class SetlistController(
     val book: StateFlow<SetlistBook> get() = repository.book
 
     var importMessage by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * The last set list taken from somewhere else, as this device holds it.
+     *
+     * The follower needs it to play from: a leader's push names songs by the
+     * leader's ids, and this copy names them by the ids that mean something
+     * here. Held rather than looked up because the position that follows a push
+     * arrives within milliseconds of it, and searching the book by name for
+     * "whichever list this probably is" would be a guess.
+     */
+    var adopted by mutableStateOf<Setlist?>(null)
         private set
 
     /**
@@ -188,25 +202,37 @@ class SetlistController(
      */
     fun adopt(incoming: Setlist, from: String?) {
         scope.launch {
-            val resolution = SetlistCodec.resolve(incoming, library.index.value)
-            val localised = incoming.copy(
-                id = UUID.randomUUID().toString(),
-                entries = resolution.resolved.map { resolved ->
-                    resolved.localSongId?.let { resolved.entry.copy(songId = it) } ?: resolved.entry
-                },
-                updatedAt = System.currentTimeMillis(),
+            val taken = SetlistCodec.adopt(
+                incoming = incoming,
+                existing = repository.book.value.setlists,
+                library = library.index.value,
+                now = System.currentTimeMillis(),
+                newId = { UUID.randomUUID().toString() },
             )
-            repository.save(localised)
+            repository.save(taken.setlist)
+            Diagnostics.log(
+                Area.SETLIST,
+                (if (taken.replaced) "updated" else "added") +
+                    " \"${taken.setlist.name}\" from ${from ?: "a file"}: " +
+                    "${taken.resolved.size - taken.missing.size} of ${taken.setlist.size} " +
+                    "charts resolved, local id ${Diagnostics.short(taken.setlist.id)}, " +
+                    "origin ${Diagnostics.short(taken.setlist.originId)}",
+            )
+            // Published so the viewer can follow a leader through a set list it
+            // was sent: the entries here point at this device's own charts,
+            // which the leader's copy does not.
+            adopted = taken.setlist
 
+            val verb = if (taken.replaced) "Updated" else "Added"
             importMessage = when {
-                resolution.allPresent ->
-                    "Added \"${incoming.name}\"" + (from?.let { " from $it" } ?: "") +
+                taken.allPresent ->
+                    "$verb \"${incoming.name}\"" + (from?.let { " from $it" } ?: "") +
                         ". All ${incoming.size} charts are here."
                 else ->
-                    "Added \"${incoming.name}\", but ${resolution.missing.size} of " +
+                    "$verb \"${incoming.name}\", but ${taken.missing.size} of " +
                         "${incoming.size} charts are not in your library: " +
-                        resolution.missing.take(5).joinToString(", ") { it.entry.title } +
-                        if (resolution.missing.size > 5) ", and more." else "."
+                        taken.missing.take(5).joinToString(", ") { it.entry.title } +
+                        if (taken.missing.size > 5) ", and more." else "."
             }
         }
     }

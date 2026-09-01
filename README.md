@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 336 tests that run on a plain JVM; the
+band-sync and update layers are covered by 350 tests that run on a plain JVM; the
 app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -327,6 +327,18 @@ afterwards, because the check knows something that first offer cannot: a chart
 that resolves perfectly and then will not open is invisible to it, and is exactly
 the one somebody wants a fresh copy of.
 
+### When something goes wrong
+
+**Settings — Diagnostics** shows the last few hundred things the app did: who
+joined the session and from what address, what was pushed and to how many, who
+was dropped and why, which chart would not open and what the file system said
+about it. One button sends it to somebody who can read it.
+
+It is kept in memory, so it is lost when the app closes and never accumulates on
+the phone. The screen says plainly what is in it before you send it: your device
+name, the other devices, the session name, the songs by title, and the addresses
+those devices had on the local network — and no part of any chart.
+
 ### Updating itself
 
 There is no Play Store listing, so **Settings - Check for updates** fetches the
@@ -573,7 +585,7 @@ already on a phone — that install needs an uninstall first, once.
 Being specific about this, because "it builds" and "it works on stage" are
 different claims.
 
-**Tested, by 336 automated tests on the JVM.** Two of these found real bugs
+**Tested, by 350 automated tests on the JVM.** Two of these found real bugs
 during development — the pagination budget check caught a page-break rule that
 could overflow a short viewport, and the chord-word test caught a parser that
 would have rewritten the word "Add" as a chord.
@@ -589,7 +601,10 @@ would have rewritten the word "Add" as a chord.
 | Analysis | Non-diatonic chords; capo suggestions; tab detection |
 | Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned; the ChordPro title block on the first page only |
 | Set lists | Reorder, JSON round trip, malformed input, cross-device matching |
-| Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases; a build that has never heard of a message ignores it rather than dropping the session |
+| Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases; a build that has never heard of a message ignores it rather than dropping the session; a heartbeat reply keeps a quiet follower in the list |
+| Following the leader | Resolving the leader's song against a library that has never seen their ids — by hash, then title, and refusing to guess |
+| Adopting a set list | The same list arriving twice is one list; a list relayed through a second device keeps its identity; a local list is never landed on |
+| Diagnostics | Ring buffer keeps the newest and drops the oldest; the rendered log carries its header and says what is in it |
 | Updates | SemVer ordering including `dev.9` against `dev.10`; a release outranking its own pre-releases; downgrades never offered; drafts and APK-less releases skipped; the debug APK never chosen; a real releases payload; checksum parsing |
 | Tap zones | The exact 1/3–2/3 split; mirroring; the menu band across the top, including with tap-to-turn off |
 | Backstage | Every verdict and its wording; silence counted as silence; trouble grouped by song and person; reports replaced, and dropped with the device that sent them |

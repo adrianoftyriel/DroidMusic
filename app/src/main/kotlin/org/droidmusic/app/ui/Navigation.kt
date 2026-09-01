@@ -30,6 +30,9 @@ sealed interface Screen {
     data object Settings : Screen
     data object FootSwitchSetup : Screen
     data object Updates : Screen
+
+    /** The log of what the app just did, for sending to somebody who can read it. */
+    data object Diagnostics : Screen
     data object Capture : Screen
 
     /**

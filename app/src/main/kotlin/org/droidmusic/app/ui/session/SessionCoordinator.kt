@@ -127,6 +127,10 @@ class SessionCoordinator(
             deviceId = current.deviceId,
             deviceName = current.deviceName.ifEmpty { "Player" },
             appVersion = appVersion,
+            // So a reconnect can find a leader that has moved. The address a
+            // session was joined on stops being true the moment the leader's app
+            // restarts, because the port it binds is an ephemeral one.
+            relocate = { name -> discovery.resolveOnce(name) },
         )
         client = newClient
         _role.value = SessionRole.FOLLOWER

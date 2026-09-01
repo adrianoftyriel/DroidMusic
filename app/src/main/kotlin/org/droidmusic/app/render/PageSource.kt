@@ -299,6 +299,16 @@ class ChartPageSource(
 
     override fun rowsFor(page: Int): List<ChartRow> = pages.getOrElse(page) { emptyList() }
 
+    /**
+     * Every page as laid out right now.
+     *
+     * Handed out whole so the viewer can hold it as observable state: what
+     * changes when a chart is transposed is the content of these rows, not the
+     * page count, the page number or this object, and a caller watching any of
+     * those would never learn that the chart had been rewritten.
+     */
+    fun pages(): List<List<ChartRow>> = pages
+
     /** Re-transposes and re-paginates. Returns the page holding [keepRowIndex]. */
     fun apply(request: TransposeRequest, linesPerPage: Int, keepRowIndex: Int = 0): Int {
         current = Transposer.transpose(original, request)

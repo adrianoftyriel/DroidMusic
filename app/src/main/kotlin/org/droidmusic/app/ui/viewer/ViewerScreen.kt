@@ -256,8 +256,11 @@ private fun PageContent(
             }
         }
 
+        // The rows come from the controller rather than from the source: they
+        // are what a transposition rewrites, and only the controller publishes
+        // them as state Compose can see.
         is TextPageSource -> ChartPage(
-            rows = source.rowsFor(pageIndex),
+            rows = controller.rowsFor(pageIndex),
             fontSizeSp = fontSizeSp,
             dark = preferences.darkChart,
         )

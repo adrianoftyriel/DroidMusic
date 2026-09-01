@@ -636,6 +636,37 @@ newline framing is only sound if that holds.
 
 ---
 
+### Which chart the follower opens
+
+A `position` names a song three ways and only two of them travel. `songId` is
+derived from the id of the *source* it was indexed from, and a source id is a
+UUID generated on the device that added the folder — so the leader's id for a
+chart matches nothing on any other device, even when both are reading identical
+files.
+
+A follower that looked up only the id therefore followed every page turn
+correctly while never once opening the song. It presented as "the charts do not
+show up on the other phones", which sounds like a transfer problem and is not
+one. Resolution now goes id, then content hash, then title — the same order, and
+for the same reason, as matching a set list that arrived from somewhere else.
+
+### One set list, not five
+
+A set list crossing between devices keeps an **origin id**: the id of the copy on
+the device that first made it. Without it, every arrival was a new list, and a
+leader pushes the running order when the set starts and again when a check is
+run, a reconnecting follower is sent it again, and somebody mailed the file
+opens it twice. A rehearsal ended with five identical set lists.
+
+With it, the same running order arriving again replaces the copy already here.
+Replacing rather than merging is deliberate: an incoming push is the leader
+saying what the band is playing tonight, and a list that quietly kept a
+follower's older order would be worse than one that changed under them. A list
+relayed on by a follower who adopted it carries the original origin, so a third
+device still sees one list.
+
+---
+
 ## 9. The viewer
 
 ### Tap zones
@@ -759,6 +790,22 @@ page four of a chart is. The protocol syncs a page number and each device
 resolves it against its own layout; for PDFs, which is most performance
 material, the two agree exactly.
 
+### The chart on screen is state, and the page source is not
+
+Transposing rewrites the rows *inside* the page source. The object does not
+change, the page number does not change, and nothing else the screen was
+watching changes either — so Compose had no reason to draw again, and the chart
+sat there in its original key while the pill beside it said otherwise. The
+control appeared to do nothing at all.
+
+The fix is not to make the page source observable. It is for the controller to
+publish the laid-out pages, and the transposition that produced them, as state —
+which is the rule the rest of the viewer already follows: the screen reads the
+controller, the controller owns the state, and the render layer stays a plain
+object that has never heard of Compose. Three places rewrite a chart (opening
+one, transposing, re-flowing for a new size) and each republishes on the line
+after.
+
 ### Monospaced, and horizontally scrolling
 
 Charts are drawn in a monospaced font. Not for looks: the chord sits above the
@@ -828,7 +875,38 @@ problem.
 
 ---
 
-## 11. Foot switches
+## 11. Diagnostics, and why they are in memory
+
+The bugs that matter in this app are the ones that cannot be reproduced at a
+desk: a follower that stopped following twenty minutes into a set, a chart that
+appeared on three phones out of four, an mDNS lookup that found nothing in one
+particular room. They happen once, on somebody else's device, on a network
+nobody controls, and afterwards there is nothing to look at but a recollection
+of the order things happened in.
+
+So the app keeps the last few hundred things it did — who joined, what was sent
+and to how many, what was dropped and why, what would not open — and Settings
+has a screen that shows them and a button that hands them to the share sheet.
+
+**In memory, not on disk.** A log file would need a retention policy, would grow
+while nobody was reading it, and would sit in the app's storage holding the name
+of somebody's band and the titles of their charts for as long as the app was
+installed. A ring buffer of four hundred lines is about forty kilobytes, is lost
+when the app is killed, and leaves the device only when somebody deliberately
+sends it.
+
+**Facts, not narration.** Every line says what happened, to whom, with the
+numbers: `dropped a1b2c3: nothing heard for 20s` rather than `handling
+reconnect`. Whoever reads it is hunting for the moment it went wrong.
+
+**It says what is in it.** The screen and the file both state plainly that the
+log names the device, the other devices, the session, the songs by title and the
+addresses they had on the local network — and that no chart is read into it.
+Somebody sending a log to a stranger should not have to guess.
+
+---
+
+## 12. Foot switches
 
 The thing that makes this tractable is that both Bluetooth and USB pedals
 present themselves to Android as HID keyboards. By the time the app sees
@@ -861,7 +939,7 @@ it does not also scroll something.
 
 ---
 
-## 12. Building a set list by hand
+## 13. Building a set list by hand
 
 Two gestures, both of them the ones a phone has already taught everybody.
 
@@ -882,7 +960,7 @@ because a row that lands one place off still looks like a list and the running
 order is only found to be wrong from the stage.
 
 The order is written when the finger lifts, not on every row it crosses. Each
-save is a whole-file write (section 13), and thirty of them during one drag would
+save is a whole-file write (section 14), and thirty of them during one drag would
 be both slow and a good way to leave a half-written set list behind. Until then
 the screen shows its own copy of the order, because the saved one comes back
 through a file write and a flow and cannot keep up with a moving finger.
@@ -895,7 +973,7 @@ that the finger has gone.
 
 ---
 
-## 13. Storage
+## 14. Storage
 
 Settings, set lists and the file index are JSON files, not a database.
 
@@ -919,7 +997,7 @@ and a random UUID does that perfectly.
 
 ---
 
-## 14. Things deliberately not built
+## 15. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
@@ -933,7 +1011,7 @@ and a random UUID does that perfectly.
 - **A cloud account or a sync server.** The band are in the same room. Set lists
   travel as files or over the local network, and nothing needs an account.
 - **Drag-and-drop set list reordering *instead of* buttons.** The drag is built
-  — section 12 — but the up and down buttons stay next to it. A mis-drag that
+  — section 13 — but the up and down buttons stay next to it. A mis-drag that
   silently moves song four to position eleven is not noticed until somebody is
   on stage, and a drag is invisible to a screen reader; the buttons are both the
   careful path and the accessible one.

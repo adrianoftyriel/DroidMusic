@@ -11,6 +11,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.droidmusic.app.data.DocumentSources
+import org.droidmusic.app.diag.Area
+import org.droidmusic.app.diag.Diagnostics
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.data.SettingsRepository
 import org.droidmusic.app.render.OpenResult
@@ -127,6 +129,13 @@ class BackstageController(
 
             checkedAt = System.currentTimeMillis()
             checking = false
+            Diagnostics.log(
+                Area.CHART,
+                "checked \"${list.name}\": ${results.count { it.isProblem }} of " +
+                    "${results.size} need attention" +
+                    results.filter { it.isProblem }
+                        .joinToString("") { " [${it.title}: ${it.state}]" },
+            )
             onReport?.invoke(report())
         }
     }

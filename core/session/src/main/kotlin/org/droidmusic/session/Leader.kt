@@ -81,6 +81,25 @@ object LeaderSession {
         reports = state.reports.filterNot { it.deviceId == deviceId },
     )
 
+    /**
+     * Notes that a device has been heard from, whatever it said.
+     *
+     * Every inbound line counts, and the heartbeat reply is the important one:
+     * a follower that is quietly doing as it is told sends nothing else for
+     * minutes at a time. Counting only the messages that carry news is how a
+     * band that was working perfectly disappeared from the leader's screen
+     * twenty seconds into the first song - the socket was open, the pages were
+     * turning, and the leader had evicted everybody for saying nothing.
+     */
+    fun seen(state: LeaderState, deviceId: String, now: Long): LeaderState {
+        if (state.followers.none { it.deviceId == deviceId }) return state
+        return state.copy(
+            followers = state.followers.map {
+                if (it.deviceId == deviceId) it.copy(lastSeenAt = now) else it
+            },
+        )
+    }
+
     fun withStatus(state: LeaderState, status: FollowerStatus, now: Long): LeaderState {
         val updated = state.followers.map { follower ->
             if (follower.deviceId != status.deviceId) {

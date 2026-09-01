@@ -30,6 +30,7 @@ import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.input.PageAction
 import org.droidmusic.app.capture.CaptureController
 import org.droidmusic.app.capture.CaptureScreen
+import org.droidmusic.app.diag.DiagnosticsScreen
 import org.droidmusic.app.ui.backstage.BackstageController
 import org.droidmusic.app.ui.backstage.BackstageScreen
 import org.droidmusic.app.ui.library.LibraryController
@@ -51,6 +52,7 @@ import org.droidmusic.app.ui.viewer.ViewerSurface
 import org.droidmusic.library.Setlist
 import org.droidmusic.library.SetlistCodec
 import org.droidmusic.library.SongRef
+import org.droidmusic.session.songFor
 
 /**
  * The whole app, assembled.
@@ -191,14 +193,37 @@ fun DroidMusicRoot(
 
     // The band leader moved. Follow, unless the state machine already decided we
     // should not - it only publishes positions that ought to be applied.
+    //
+    // The song is looked up by content hash and title as well as by id, and that
+    // is the whole of why a leader's song changes used to arrive on nobody's
+    // screen: a song id is derived from the source it was indexed from, and a
+    // source id is a UUID made on the device that added the folder, so the
+    // leader's id for a chart matches nothing anywhere else. See
+    // LibraryIndex.songFor.
     val remotePosition by sessionCoordinator.remotePosition.collectAsState()
     LaunchedEffect(remotePosition) {
         val position = remotePosition ?: return@LaunchedEffect
-        val songId = position.songId
-        if (songId != null && songId != viewerController.song?.id) {
-            navigator.replace(Screen.Viewer(songId, setlistIndex = position.setlistIndex))
-            viewerController.open(songId, null, position.setlistIndex, settings.viewer.unicodeAccidentals)
+        val local = app.library.index.value.songFor(position)
+
+        if (local != null && local.id != viewerController.song?.id) {
+            // Followed through this device's own copy of the running order, so
+            // that the header says which song of how many and a foot switch can
+            // still walk out of the end of one song into the next.
+            val following = setlistController.adopted?.takeIf { position.setlistIndex >= 0 }
+            navigator.replace(Screen.Viewer(local.id, setlistIndex = position.setlistIndex))
+            viewerController.open(
+                local,
+                following,
+                position.setlistIndex,
+                settings.viewer.unicodeAccidentals,
+            )
+        } else if (local == null && position.songId != null) {
+            // Said out loud rather than left as a chart that never appears. The
+            // leader is on something this device has not got, which Backstage
+            // exists to catch before the set rather than during it.
+            viewerController.reportMissing(position.songTitle)
         }
+
         viewerController.applyRemote(
             page = position.page,
             transposeSemitones = position.transposeSemitones,
@@ -443,6 +468,7 @@ fun DroidMusicRoot(
                         onChange = { transform -> app.settings.updateAsync(transform) },
                         onOpenFootSwitchSetup = { navigator.go(Screen.FootSwitchSetup) },
                         onOpenUpdates = { navigator.go(Screen.Updates) },
+                        onOpenDiagnostics = { navigator.go(Screen.Diagnostics) },
                         onBack = { navigator.back() },
                         versionName = DroidMusicApp.VERSION,
                         releaseTag = updateController.currentTag,
@@ -468,6 +494,28 @@ fun DroidMusicRoot(
                         },
                         onBack = { navigator.back() },
                         versionName = DroidMusicApp.VERSION,
+                    )
+
+                    Screen.Diagnostics -> DiagnosticsScreen(
+                        // Worked out here rather than inside the screen: what is
+                        // worth knowing about a device is the app's business,
+                        // and the log itself should stay a list of facts.
+                        about = listOf(
+                            "App" to DroidMusicApp.VERSION +
+                                (updateController.currentTag?.let { " ($it)" } ?: " (from source)"),
+                            "Device" to settings.deviceName.ifEmpty { "unnamed" },
+                            "Android" to "${android.os.Build.MODEL}, API ${android.os.Build.VERSION.SDK_INT}",
+                            "Session" to when (sessionRole) {
+                                SessionRole.LEADER -> "leading \"${sessionLabel ?: "?"}\" " +
+                                    "with ${leaderState?.followers?.size ?: 0} following"
+                                SessionRole.FOLLOWER -> "following \"${sessionLabel ?: "?"}\", " +
+                                    "${followerState?.link}, ${followerState?.mode}"
+                                SessionRole.NONE -> "not in a session"
+                            },
+                            "Library" to "${app.library.index.value.songs.size} charts from " +
+                                "${app.library.index.value.sources.size} sources",
+                        ),
+                        onBack = { navigator.back() },
                     )
 
                     Screen.FootSwitchSetup -> FootSwitchSetupScreen(

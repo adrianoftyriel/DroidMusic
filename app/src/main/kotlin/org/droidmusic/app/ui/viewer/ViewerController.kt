@@ -7,6 +7,8 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.droidmusic.app.data.LibraryRepository
+import org.droidmusic.app.diag.Area
+import org.droidmusic.app.diag.Diagnostics
 import org.droidmusic.app.render.ChartPageSource
 import org.droidmusic.app.render.OpenResult
 import org.droidmusic.app.render.PageSource
@@ -14,9 +16,11 @@ import org.droidmusic.app.render.PageSources
 import org.droidmusic.library.Setlist
 import org.droidmusic.library.SongRef
 import org.droidmusic.music.ChartAnalysis
+import org.droidmusic.music.ChartRow
 import org.droidmusic.music.ChartAnalyzer
 import org.droidmusic.music.Key
 import org.droidmusic.music.TransposeRequest
+import org.droidmusic.music.TransposeResult
 
 /**
  * Everything the viewer screen needs to know, and the only place that decides
@@ -84,6 +88,28 @@ class ViewerController(
         private set
 
     /**
+     * The laid-out pages of a chart, and the transposition that produced them.
+     *
+     * A copy of what [ChartPageSource] holds, kept here as observable state,
+     * and the reason is the whole of why transposing appeared to do nothing at
+     * all. Transposing a chart rewrites the rows *inside* the page source
+     * without changing the object, the page number, or anything else the screen
+     * was watching - so Compose had no reason to draw again, and the chart sat
+     * there in its original key while the key pill next to it said otherwise.
+     *
+     * Publishing the result here rather than making the page source observable
+     * keeps the rule the rest of the viewer already follows: the screen reads
+     * the controller, the controller owns the state, and the render layer stays
+     * a plain object that knows nothing about Compose.
+     */
+    var chartPages by mutableStateOf<List<List<ChartRow>>>(emptyList())
+        private set
+
+    /** The transposed song on screen: its key, what it was, and any capo. */
+    var transposed by mutableStateOf<TransposeResult?>(null)
+        private set
+
+    /**
      * The row of the chart at the top of the current page.
      *
      * Tracked because it, not the page number, is what a reflowable chart has to
@@ -103,7 +129,14 @@ class ViewerController(
     private var openAtLastPage = false
     private var linesPerPage = ChartPageSource.DEFAULT_LINES_PER_PAGE
 
-    val pageCount: Int get() = source?.pageCount ?: 0
+    /**
+     * Pages in the open document.
+     *
+     * For a chart this comes from [chartPages] rather than from the source, so
+     * that a re-flow which changes the page count is seen by anything drawing
+     * from it. For a PDF the count is a property of the file and never moves.
+     */
+    val pageCount: Int get() = if (chartSource != null) chartPages.size else source?.pageCount ?: 0
 
     val visiblePages: List<Int> get() = PageLayoutRules.visiblePages(page, pageCount, mode)
 
@@ -111,15 +144,69 @@ class ViewerController(
 
     val chartSource: ChartPageSource? get() = source as? ChartPageSource
 
+    /** The rows to draw on [page]. Empty for anything that is not a chart. */
+    fun rowsFor(page: Int): List<ChartRow> = chartPages.getOrElse(page) { emptyList() }
+
+    /**
+     * Republishes the laid-out chart after anything that rewrites it.
+     *
+     * Called from the three places that can: opening a song, transposing, and
+     * re-flowing for a new viewport or text size. Forgetting it in a fourth
+     * would show a stale chart, so they are all within a few lines of each
+     * other and each one is immediately followed by this.
+     */
+    private fun syncChart() {
+        val chart = chartSource
+        if (chart == null) {
+            chartPages = emptyList()
+            transposed = null
+            return
+        }
+        chartPages = chart.pages()
+        transposed = chart.current
+    }
+
     fun open(songId: String, setlist: Setlist?, index: Int, unicodeAccidentals: Boolean) {
         val ref = library.index.value.findById(songId)
         if (ref == null) {
             error = "That chart is no longer in the library."
             return
         }
+        open(ref, setlist, index, unicodeAccidentals)
+    }
+
+    /**
+     * Opens a chart the caller has already found.
+     *
+     * The band-leader path comes in here rather than through the id, because
+     * resolving one device's song id against another device's library is not
+     * something the viewer can do - and is not something it should know exists.
+     */
+    fun open(song: SongRef, setlist: Setlist?, index: Int, unicodeAccidentals: Boolean) {
         this.setlist = setlist
         this.setlistIndex = index
-        openRef(ref, unicodeAccidentals)
+        openRef(song, unicodeAccidentals)
+    }
+
+    /**
+     * Says that the band has moved to a chart this device has not got.
+     *
+     * Named rather than blank: a player looking at a screen that did not change
+     * needs to know whether the app is broken, the network is down, or they are
+     * missing a file - and only the third is true here.
+     */
+    fun reportMissing(title: String?) {
+        source?.close()
+        source = null
+        song = null
+        syncChart()
+        Diagnostics.log(Area.CHART, "band is on \"${title ?: "?"}\", which is not in this library")
+        error = if (title.isNullOrBlank()) {
+            "The band is on a chart this device has not got."
+        } else {
+            "The band is on \"$title\", which is not in this library. Backstage will find " +
+                "the rest before the next set."
+        }
     }
 
     private fun openRef(ref: SongRef, unicodeAccidentals: Boolean) {
@@ -130,6 +217,7 @@ class ViewerController(
             source = null
             analysis = null
             transposeNotes = emptyList()
+            syncChart()
 
             // The reason comes back with the failure rather than being worked
             // out afterwards. A grant Android has stopped honouring, a file that
@@ -140,6 +228,7 @@ class ViewerController(
                 is OpenResult.Ok -> result.source
                 is OpenResult.Failed -> {
                     loading = false
+                    Diagnostics.log(Area.CHART, "${ref.displayName} would not open: ${result.reason}")
                     error = "Could not open ${ref.displayName}. ${result.reason}"
                     return@launch
                 }
@@ -149,6 +238,7 @@ class ViewerController(
             source = opened
             page = 0
             topRowIndex = 0
+            syncChart()
 
             // Which key to open in, most specific first: what the set list says
             // for tonight, then the key the band always plays this song in, then
@@ -172,6 +262,9 @@ class ViewerController(
                     analysis = ChartAnalyzer.analyze(chart.current.song)
                     applyTranspose()
                 }
+                // Even when the analyser threw and the transposition never ran,
+                // the chart itself is open and has rows to draw.
+                syncChart()
             }
 
             if (openAtLastPage) {
@@ -197,6 +290,7 @@ class ViewerController(
         // every time the phone was rotated.
         page = chart.relayout(linesThatFit, topRowIndex)
         topRowIndex = chart.firstRowIndexOf(page)
+        syncChart()
     }
 
     /**
@@ -299,6 +393,7 @@ class ViewerController(
         topRowIndex = chart.firstRowIndexOf(page)
         transposeNotes = chart.current.notes
         analysis = ChartAnalyzer.analyze(chart.current.song)
+        syncChart()
     }
 
     /** Applies a position that came from the band leader. */
@@ -314,5 +409,6 @@ class ViewerController(
     fun close() {
         source?.close()
         source = null
+        syncChart()
     }
 }

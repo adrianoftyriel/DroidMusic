@@ -37,6 +37,7 @@ fun SettingsScreen(
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onOpenFootSwitchSetup: () -> Unit,
     onOpenUpdates: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onBack: () -> Unit,
     versionName: String,
     releaseTag: String?,
@@ -259,6 +260,16 @@ fun SettingsScreen(
                         onCheckedChange = { on -> onChange { it.copy(indexChartContents = on) } },
                     )
                 },
+            )
+
+            SectionLabel("When something goes wrong")
+
+            SettingRow(
+                title = "Diagnostics",
+                subtitle = "What the app did: who joined the session, what was sent, what " +
+                    "would not open. Kept in memory for the last few hundred lines, and sent " +
+                    "nowhere unless you send it.",
+                onClick = onOpenDiagnostics,
             )
 
             SectionLabel("Updates")

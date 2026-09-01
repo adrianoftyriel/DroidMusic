@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.droidmusic.app.diag.Area
+import org.droidmusic.app.diag.Diagnostics
 import org.droidmusic.session.BackstageReport
 import org.droidmusic.session.CheckReport
 import org.droidmusic.session.CheckRequest
@@ -61,6 +63,12 @@ class SessionClient(
     private val deviceId: String,
     private val deviceName: String,
     private val appVersion: String,
+    /**
+     * Looks the session up again by name. Optional so the client can still be
+     * built without discovery - in tests, or against an address typed in by
+     * hand - in which case a reconnect simply reuses the address it has.
+     */
+    private val relocate: (suspend (String) -> DiscoveredSession?)? = null,
 ) {
     private var socket: Socket? = null
 
@@ -74,6 +82,7 @@ class SessionClient(
     private var writer: java.io.BufferedWriter? = null
 
     private var job: Job? = null
+    @Volatile
     private var target: DiscoveredSession? = null
     private var seq = 0L
 
@@ -108,6 +117,10 @@ class SessionClient(
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
     fun join(session: DiscoveredSession) {
+        Diagnostics.log(
+            Area.FOLLOWER,
+            "joining \"${session.serviceName}\" at ${session.host}:${session.port}",
+        )
         target = session
         job?.cancel()
         job = scope.launch(Dispatchers.IO) { connectionLoop(session) }
@@ -117,24 +130,74 @@ class SessionClient(
      * Reconnects for as long as the session is meant to be joined, backing off
      * so that a leader who has genuinely gone home does not cost the followers
      * their battery for the rest of the night.
+     *
+     * Two things it has to get right, and neither was obvious until a band tried
+     * it in a room.
+     *
+     * **The address is not durable.** The leader binds an ephemeral port, so a
+     * leader whose app restarted is listening on a different one, and a phone
+     * that dropped off the wifi and back may have a different address as well.
+     * Retrying the address this device first saw would retry it all night. So
+     * every reconnect asks mDNS where the session is now, and falls back to the
+     * last known address when the lookup finds nothing - which is the right
+     * answer on a network that blocks multicast, where the address is all there
+     * ever was.
+     *
+     * **A connection that ended immediately is not a success.** The backoff used
+     * to reset whenever a connection had been established at all, so a leader
+     * that accepted and instantly closed - a refused protocol version, a socket
+     * dying at the far end - produced an unpaced retry loop. It resets only
+     * after a connection that lasted, and every other case waits.
      */
-    private suspend fun connectionLoop(session: DiscoveredSession) {
+    private suspend fun connectionLoop(first: DiscoveredSession) {
+        var session = first
         var backoff = INITIAL_BACKOFF_MS
+
         while (scope.isActive) {
-            val connected = runCatching { attempt(session) }.getOrElse { false }
-            if (connected) {
-                backoff = INITIAL_BACKOFF_MS
-            } else {
-                delay(backoff)
-                backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
-            }
+            val startedAt = System.currentTimeMillis()
+            runCatching { attempt(session) }
+            val lasted = System.currentTimeMillis() - startedAt
+
             if (_state.value.link == LinkState.OFFLINE) return
+
+            if (lasted >= STABLE_CONNECTION_MS) {
+                backoff = INITIAL_BACKOFF_MS
+            }
+            Diagnostics.log(
+                Area.FOLLOWER,
+                "connection to ${session.host}:${session.port} lasted ${lasted / 1000}s, " +
+                    "retrying in ${backoff / 1000}s",
+            )
+            delay(backoff)
+            backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
+
+            if (_state.value.link == LinkState.OFFLINE) return
+
+            // Ask where the session is now. Keep what we have if nobody answers.
+            val moved = relocate?.let { lookUp ->
+                runCatching { lookUp(session.serviceName) }.getOrNull()
+            }
+            when {
+                moved == null -> Diagnostics.log(
+                    Area.FOLLOWER,
+                    "mDNS found no \"${session.serviceName}\"; retrying the address we have",
+                )
+                moved.host != session.host || moved.port != session.port -> Diagnostics.log(
+                    Area.FOLLOWER,
+                    "\"${session.serviceName}\" moved to ${moved.host}:${moved.port}",
+                )
+            }
+            session = moved ?: session
         }
     }
 
     /** One connection, from open to close. Returns true if it ever got going. */
     private suspend fun attempt(session: DiscoveredSession): Boolean {
         var everConnected = false
+        // Kept current, because a reconnect may have found the session at a new
+        // address and everything else that asks where the leader is - the chart
+        // channel included - should be told the same answer.
+        target = session
         val client = Socket()
         try {
             client.tcpNoDelay = true
@@ -160,6 +223,11 @@ class SessionClient(
                 when (val message = Wire.decode(line)) {
                     is Welcome -> {
                         if (!message.accepted) {
+                            Diagnostics.log(
+                                Area.FOLLOWER,
+                                "refused by ${message.leaderName}: " +
+                                    (message.reason ?: "no reason given"),
+                            )
                             _lastError.value = message.reason ?: "The leader declined the connection."
                             dispatch(FollowerEvent.LeaveRequested)
                             return everConnected
@@ -170,12 +238,31 @@ class SessionClient(
                         _chartSource.value = message.filePort
                             .takeIf { it > 0 }
                             ?.let { ChartSource(session.host, it) }
+                        Diagnostics.log(
+                            Area.FOLLOWER,
+                            "connected to \"${message.sessionName}\" led by ${message.leaderName}" +
+                                (if (message.filePort > 0) ", charts on ${message.filePort}" else ""),
+                        )
                         dispatch(FollowerEvent.Connected(message.sessionName), ::send)
                     }
 
-                    is Position -> dispatch(FollowerEvent.LeaderPosition(message), ::send)
+                    is Position -> {
+                        Diagnostics.log(
+                            Area.FOLLOWER,
+                            "position #${message.seq}: ${message.songTitle ?: "no song"} " +
+                                "p${message.page + 1}, this device is ${_state.value.mode}",
+                        )
+                        dispatch(FollowerEvent.LeaderPosition(message), ::send)
+                    }
 
-                    is SetlistPush -> _setlistPushes.tryEmit(message)
+                    is SetlistPush -> {
+                        Diagnostics.log(
+                            Area.SETLIST,
+                            "sent \"${message.setlist.name}\" (${message.setlist.size} songs, " +
+                                "id ${Diagnostics.short(message.setlist.identity)})",
+                        )
+                        _setlistPushes.tryEmit(message)
+                    }
 
                     is ChartsOffered -> _chartOffers.tryEmit(message)
 
@@ -184,6 +271,7 @@ class SessionClient(
                     is Ping -> send(Pong(nextSeq(), message.sentAt, deviceId))
 
                     is Goodbye -> {
+                        Diagnostics.log(Area.FOLLOWER, "leader said goodbye: ${message.reason}")
                         _lastError.value = message.reason ?: "The leader ended the session."
                         dispatch(FollowerEvent.LeaveRequested)
                         return everConnected
@@ -192,9 +280,14 @@ class SessionClient(
                     else -> Unit
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // Nothing to distinguish here: a refused connection, a timeout and a
-            // reset all mean the same thing to a player standing on a stage.
+            // reset all mean the same thing to a player standing on a stage. The
+            // log is the one place the difference is worth keeping.
+            Diagnostics.log(
+                Area.FOLLOWER,
+                "connection ended: ${e.message ?: e::class.java.simpleName}",
+            )
         } finally {
             runCatching { client.close() }
             socket = null
@@ -290,6 +383,14 @@ class SessionClient(
     private fun nextSeq(): Long = ++seq
 
     companion object {
+        /**
+         * How long a connection has to last to count as having worked.
+         *
+         * Above the round trip of a refusal - hello out, welcome back, socket
+         * closed - and well below the length of a song.
+         */
+        const val STABLE_CONNECTION_MS = 5_000L
+
         const val CONNECT_TIMEOUT_MS = 4_000
         const val READ_TIMEOUT_MS = 30_000
         const val INITIAL_BACKOFF_MS = 1_000L

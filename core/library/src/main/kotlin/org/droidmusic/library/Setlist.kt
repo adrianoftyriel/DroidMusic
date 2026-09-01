@@ -37,8 +37,30 @@ data class Setlist(
     val date: String? = null,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
+    /**
+     * Where this list came from, when it came from somewhere else.
+     *
+     * The id of the copy on the device that first made it. It exists so that a
+     * set list arriving twice is recognised as the same set list: a leader
+     * pushes the running order when the set is started and again when a check is
+     * run, a follower reconnecting is sent it again, and somebody who was mailed
+     * the file opens it twice. Without an identity that survives the crossing,
+     * each of those was a fresh copy, and a band ended a rehearsal with five
+     * identical lists.
+     *
+     * Null on a list this device made itself.
+     */
+    val originId: String? = null,
 ) {
     val size: Int get() = entries.size
+
+    /**
+     * What this list *is*, across devices. Its origin if it has one, otherwise
+     * its own id - which is what a list being pushed on by a follower who
+     * adopted it should carry, so a third device recognises it as one list
+     * rather than as two.
+     */
+    val identity: String get() = originId ?: id
 
     fun withEntryAt(index: Int, transform: (SetlistEntry) -> SetlistEntry): Setlist =
         copy(entries = entries.mapIndexed { i, e -> if (i == index) transform(e) else e })
@@ -89,6 +111,8 @@ data class SetlistBundle(
 data class SetlistImport(
     val setlist: Setlist,
     val resolved: List<ResolvedEntry>,
+    /** True when this replaced a copy of the same list already on the device. */
+    val replaced: Boolean = false,
 ) {
     val missing: List<ResolvedEntry> get() = resolved.filter { it.localSongId == null }
     val allPresent: Boolean get() = missing.isEmpty()
@@ -133,6 +157,51 @@ object SetlistCodec {
             ResolvedEntry(entry, library.match(entry.contentHash, entry.title)?.id)
         },
     )
+
+    /**
+     * Takes a set list from elsewhere and makes it this device's own.
+     *
+     * Two jobs, and the second is the one that was missing. Song ids are
+     * rewritten to point at local copies, by content hash and then title, so the
+     * entries resolve here. And the list is matched against what this device has
+     * already adopted, by [Setlist.identity], so that the same running order
+     * arriving a second time *replaces* the copy already here instead of sitting
+     * beside it.
+     *
+     * Replacing rather than merging is deliberate. An incoming push is the
+     * leader saying what the band is playing tonight; if it disagrees with a
+     * local edit, the leader is right, and a set list that quietly kept a
+     * follower's older order would be worse than one that changed under them.
+     *
+     * [newId] is passed in rather than generated here so the rule stays a pure
+     * function - the same inputs give the same list, which is what makes it
+     * worth testing.
+     */
+    fun adopt(
+        incoming: Setlist,
+        existing: List<Setlist>,
+        library: LibraryIndex,
+        now: Long,
+        newId: () -> String,
+    ): SetlistImport {
+        val resolution = resolve(incoming, library)
+        val identity = incoming.identity
+        val alreadyHere = existing.firstOrNull { it.identity == identity }
+
+        val localised = incoming.copy(
+            id = alreadyHere?.id ?: newId(),
+            originId = identity,
+            entries = resolution.resolved.map { resolved ->
+                resolved.localSongId?.let { resolved.entry.copy(songId = it) } ?: resolved.entry
+            },
+            // Kept from the copy already here, so a list adopted at the start of
+            // a rehearsal does not claim to have been created at the moment of
+            // its third push.
+            createdAt = alreadyHere?.createdAt ?: incoming.createdAt.takeIf { it > 0L } ?: now,
+            updatedAt = now,
+        )
+        return SetlistImport(localised, resolution.resolved, replaced = alreadyHere != null)
+    }
 
     /** Builds the shareable form of a set list held on this device. */
     fun bundle(setlist: Setlist, exportedBy: String?, producer: String?, now: Long): SetlistBundle =
