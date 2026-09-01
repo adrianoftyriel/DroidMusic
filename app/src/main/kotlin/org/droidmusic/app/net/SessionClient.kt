@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.droidmusic.session.BackstageReport
+import org.droidmusic.session.CheckReport
+import org.droidmusic.session.CheckRequest
 import org.droidmusic.session.FollowerEvent
 import org.droidmusic.session.FollowerMachine
 import org.droidmusic.session.FollowerState
@@ -95,6 +98,9 @@ class SessionClient(
     private val _chartSource = MutableStateFlow<ChartSource?>(null)
     val chartSource: StateFlow<ChartSource?> = _chartSource.asStateFlow()
 
+    private val _checkRequests = MutableSharedFlow<CheckRequest>(extraBufferCapacity = 8)
+    val checkRequests: SharedFlow<CheckRequest> = _checkRequests.asSharedFlow()
+
     private val _sessionName = MutableStateFlow<String?>(null)
     val sessionName: StateFlow<String?> = _sessionName.asStateFlow()
 
@@ -173,6 +179,8 @@ class SessionClient(
 
                     is ChartsOffered -> _chartOffers.tryEmit(message)
 
+                    is CheckRequest -> _checkRequests.tryEmit(message)
+
                     is Ping -> send(Pong(nextSeq(), message.sentAt, deviceId))
 
                     is Goodbye -> {
@@ -196,6 +204,18 @@ class SessionClient(
             }
         }
         return everConnected
+    }
+
+    /**
+     * Answers the leader's backstage check.
+     *
+     * Best effort, like everything else sent from here: a report that does not
+     * make it costs the leader one row on a screen, and must never cost the
+     * player a page turn. The leader shows a device that did not answer as not
+     * having answered, which is the honest reading either way.
+     */
+    fun sendReport(report: BackstageReport) {
+        sendOnCurrentSocket(CheckReport(nextSeq(), report))
     }
 
     /** The player turned a page on this device. */

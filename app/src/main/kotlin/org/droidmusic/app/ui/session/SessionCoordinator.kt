@@ -15,10 +15,12 @@ import org.droidmusic.app.net.SessionClient
 import org.droidmusic.app.net.SessionDiscovery
 import org.droidmusic.app.net.SessionServer
 import org.droidmusic.library.Setlist
+import org.droidmusic.session.BackstageReport
 import org.droidmusic.session.ChartOffer
 import org.droidmusic.session.ChartSharing
 import org.droidmusic.session.ChartShare
 import org.droidmusic.session.ChartTransfer
+import org.droidmusic.session.ChartWant
 import org.droidmusic.session.FollowMode
 import org.droidmusic.session.FollowerState
 import org.droidmusic.session.LeaderState
@@ -80,6 +82,16 @@ class SessionCoordinator(
 
     private val fetcher by lazy { ChartFetcher(context, library) }
 
+    /**
+     * A set list the leader has asked everyone to check, waiting to be checked.
+     *
+     * The set list travels with the request, so what gets checked is the
+     * leader's running order rather than whatever this device happens to have
+     * adopted under the same name.
+     */
+    private val _requestedCheck = MutableStateFlow<Setlist?>(null)
+    val requestedCheck: StateFlow<Setlist?> = _requestedCheck.asStateFlow()
+
     fun discoverSessions() = discovery.discover()
 
     suspend fun startLeading(sessionName: String) {
@@ -130,6 +142,9 @@ class SessionCoordinator(
         }
         scope.launch {
             newClient.chartOffers.collect { offered -> onOffered(offered.offers) }
+        }
+        scope.launch {
+            newClient.checkRequests.collect { _requestedCheck.value = it.setlist }
         }
         scope.launch {
             // Only a position that should actually move this device is published.
@@ -183,6 +198,32 @@ class SessionCoordinator(
         server?.pushSetlist(setlist)
     }
 
+    /**
+     * Asks the band to check they can open tonight's charts.
+     *
+     * Does nothing at all when this device is not leading, which is deliberate:
+     * a player can still run the check on their own copy, and the Backstage
+     * screen works identically whether or not anybody is listening.
+     */
+    fun requestCheck(setlist: Setlist) {
+        server?.requestCheck(setlist)
+    }
+
+    /**
+     * Sends this device's answer to the leader, when there is one to send it to.
+     *
+     * A leader's own report stays where it was made: the Backstage screen shows
+     * this device's verdict from the check itself, and [LeaderState.reports] is
+     * the followers' answers, pruned as followers come and go.
+     */
+    fun submitReport(report: BackstageReport) {
+        if (_role.value == SessionRole.FOLLOWER) client?.sendReport(report)
+    }
+
+    fun consumeRequestedCheck() {
+        _requestedCheck.value = null
+    }
+
     /** Bring this device back into step with the leader. */
     fun rejoin() {
         client?.rejoin()
@@ -199,10 +240,22 @@ class SessionCoordinator(
      * is going to play is not a problem worth a transfer.
      */
     private fun askForMissingCharts(client: SessionClient, setlist: Setlist) {
-        if (client.chartSource.value == null) return
-        val wanted = ChartShare.wanted(setlist, library.index.value)
-        if (wanted.isEmpty()) return
-        client.requestCharts(wanted)
+        requestCharts(ChartShare.wanted(setlist, library.index.value))
+    }
+
+    /**
+     * Asks the leader for a named list of charts, from Backstage.
+     *
+     * The automatic ask above fires when a set list arrives and covers what the
+     * library cannot resolve at all. This one is the player pressing the button
+     * after the check, which knows more: a chart that resolves and then will not
+     * open is invisible to the automatic ask and is exactly the case somebody
+     * wants a fresh copy of.
+     */
+    fun requestCharts(wanted: List<ChartWant>) {
+        val active = client ?: return
+        if (active.chartSource.value == null || wanted.isEmpty()) return
+        active.requestCharts(wanted)
     }
 
     /**
@@ -301,6 +354,7 @@ class SessionCoordinator(
         _followerState.value = null
         _sessionLabel.value = null
         _remotePosition.value = null
+        _requestedCheck.value = null
     }
 
     companion object {

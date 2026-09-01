@@ -645,8 +645,41 @@ right rather than arbitrary. Forward happens ninety-nine times out of a hundred,
 so it gets the larger target, and the smaller back zone sits where a hand is
 least likely to brush it while turning in a hurry.
 
-A band across the top centre opens the controls, which means no tap is ever
-ambiguous between "turn the page" and "I need the menu".
+The top tenth of the screen, across its full width, opens the menu instead of
+turning a page, which means no tap is ever ambiguous between "turn the page" and
+"I need the menu".
+
+It is a band rather than a small centre strip because of where it is used: in
+the dark, at arm's length, by somebody holding an instrument. A target you have
+to aim at is a target you miss, and missing this one turns the page — the exact
+mistake the zone exists to prevent. Ten percent of a phone held upright is about
+a fingertip and a half: enough to hit without looking, small enough to stay out
+of the music.
+
+It is also the one part of the tap layout that is **not** configurable, and that
+is deliberate. Everything the menu holds is reachable from the menu, so nothing
+is lost by fixing it; whereas a player who had shrunk it to nothing would be left
+inside a full-screen chart with no visible way out. That state must not be
+reachable, so the setting that could reach it does not exist. For the same
+reason the band keeps working when tap-to-turn is switched off entirely.
+
+### What the menu holds
+
+Three things, because they are the three a player cannot get at while a chart
+fills the screen: **the key** it is in, **the size of the text**, and **the way
+out**.
+
+The first two are absent on a PDF, which is a picture of a page — there is
+nothing in it to re-spell or re-flow, and offering the controls anyway would be a
+promise the app cannot keep. The way out is always there, in the same place, as a
+filled button rather than one more text link beside "Session": somebody hunting
+for it is hunting for the exit.
+
+Text size sits here as well as in Settings on purpose. It re-flows the chart
+immediately — the viewer derives how many lines fit from the size on screen, so a
+bigger font is fewer lines a page and more pages, with the reader kept on the
+line they were reading. That is a thing you adjust while looking at the result,
+standing where you will be standing, not on a settings screen two taps away.
 
 ### One page or two
 
@@ -743,7 +776,59 @@ syllable and the words open up a little.
 
 ---
 
-## 10. Foot switches
+## 10. Backstage, and why the check opens the files
+
+The failure this exists to prevent is not "my chart is missing". It is "the bass
+player's chart was missing and nobody found out until bar one".
+
+**Why it opens every file rather than looking them up.** Consulting the library
+index would be instant and would answer a different question. The index is this
+app's own memory of a folder listing: a chart can sit in it, titled and keyed and
+looking perfect, while the file behind it has been renamed, left in a cloud
+folder that needs a network, downloaded only halfway, or put behind a permission
+the provider withdrew when the user cleared an app's data. None of that surfaces
+until somebody taps the song. So each entry is opened through exactly the code
+path the viewer will use at the downbeat, and anything that draws — a scan, a
+PDF — is made to render a page as well, because a truncated download opens
+perfectly and shows nothing. A long set list costs a second or two. It is the
+cheapest second or two in the app.
+
+**Why the leader's screen groups by song rather than by device.** "Two devices
+have problems" is not something anyone can act on. "Nobody but you has Copperhead
+Road" is: send the file now, or move the song. So trouble is collected per song,
+naming who, worst first — a chart nobody can open before one somebody merely has
+a different copy of.
+
+**Why a different copy is a warning and not a fault.** Two people rarely have
+byte-identical charts: one has a scan, the other a ChordPro of the same song.
+Reporting that as a failure would cry wolf at every set list in existence.
+Reporting it not at all would let somebody discover a different repeat at bar 40.
+So it is said, in amber, and nothing stops.
+
+**Why silence is never read as agreement.** A device that has not answered is
+shown as not having answered. The dangerous reading of a phone that is in
+somebody's pocket is that it is fine.
+
+**Why nothing here blocks the set.** The start button works whatever the check
+says. A band that has decided to busk a song from memory does not need an app's
+permission, and a pre-flight screen that can refuse to let you play is a screen
+people learn to skip.
+
+**Why the check request carries the whole set list.** An id means nothing on
+another phone, and matching an incoming id against a list adopted five minutes
+ago is a way to check the wrong set. The follower checks exactly what the leader
+sent, then resolves it against its own library by content hash and title — the
+same matching a shared `.dmset` goes through.
+
+**Why the protocol version did not move.** See
+[PROTOCOL.md](PROTOCOL.md): `check` and `report` are additive, an older build
+ignores them, and it can still follow page turns perfectly. Refusing every older
+device at the door over a readiness check would be a worse answer to a smaller
+problem.
+
+---
+
+## 11. Foot switches
 
 The thing that makes this tractable is that both Bluetooth and USB pedals
 present themselves to Android as HID keyboards. By the time the app sees
@@ -776,7 +861,7 @@ it does not also scroll something.
 
 ---
 
-## 11. Building a set list by hand
+## 12. Building a set list by hand
 
 Two gestures, both of them the ones a phone has already taught everybody.
 
@@ -797,7 +882,7 @@ because a row that lands one place off still looks like a list and the running
 order is only found to be wrong from the stage.
 
 The order is written when the finger lifts, not on every row it crosses. Each
-save is a whole-file write (section 12), and thirty of them during one drag would
+save is a whole-file write (section 13), and thirty of them during one drag would
 be both slow and a good way to leave a half-written set list behind. Until then
 the screen shows its own copy of the order, because the saved one comes back
 through a file write and a flow and cannot keep up with a moving finger.
@@ -810,7 +895,7 @@ that the finger has gone.
 
 ---
 
-## 12. Storage
+## 13. Storage
 
 Settings, set lists and the file index are JSON files, not a database.
 
@@ -834,7 +919,7 @@ and a random UUID does that perfectly.
 
 ---
 
-## 13. Things deliberately not built
+## 14. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
@@ -848,7 +933,7 @@ and a random UUID does that perfectly.
 - **A cloud account or a sync server.** The band are in the same room. Set lists
   travel as files or over the local network, and nothing needs an account.
 - **Drag-and-drop set list reordering *instead of* buttons.** The drag is built
-  — section 11 — but the up and down buttons stay next to it. A mis-drag that
+  — section 12 — but the up and down buttons stay next to it. A mis-drag that
   silently moves song four to position eleven is not noticed until somebody is
   on stage, and a drag is invisible to a screen reader; the buttons are both the
   careful path and the accessible one.

@@ -313,6 +313,27 @@ private fun ChartPage(rows: List<ChartRow>, fontSizeSp: Float, dark: Boolean) {
                         fontFamily = FontFamily.Monospace,
                     )
                 }
+                // The title block, on the first page of a ChordPro chart. Set in
+                // the default proportional face rather than the chart's
+                // monospace: nothing below it lines up with a title, and a
+                // proportional one fits more of a long name across a phone.
+                RowKind.TITLE -> Text(
+                    text = row.text,
+                    fontSize = (fontSizeSp * 1.45f).sp,
+                    lineHeight = (fontSizeSp * 1.75f).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ink,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                RowKind.CREDIT -> Text(
+                    text = row.text,
+                    fontSize = (fontSizeSp * 0.95f).sp,
+                    lineHeight = (fontSizeSp * 1.45f).sp,
+                    color = quietInk,
+                    maxLines = 1,
+                    softWrap = false,
+                )
                 RowKind.BLANK -> Spacer(Modifier.height((fontSizeSp * 0.7f).dp))
                 // A break has already done its work in ChartLayout.paginate,
                 // which started a fresh page at it. There is nothing left to draw.

@@ -116,6 +116,90 @@ class ChartLayoutTest {
     }
 
     @Test
+    fun `a chordpro chart opens with its title, artist and key`() {
+        val song = SongParser.parse(
+            """
+            {title: Wagon Wheel}
+            {artist: Old Crow Medicine Show}
+            {key: A}
+            [A]Heading down [E]south
+            """.trimIndent(),
+        )
+        val rows = ChartLayout.rows(song)
+        assertEquals(RowKind.TITLE, rows[0].kind)
+        assertEquals("Wagon Wheel", rows[0].text)
+        assertEquals(RowKind.CREDIT, rows[1].kind)
+        assertTrue(rows[1].text.contains("Old Crow Medicine Show"))
+        assertTrue(rows[1].text.contains("Key of A"))
+        // Once, at the top, and nowhere else.
+        assertEquals(1, rows.count { it.kind == RowKind.TITLE })
+    }
+
+    @Test
+    fun `the title block lands on the first page and never on a later one`() {
+        val song = SongParser.parse(
+            buildString {
+                appendLine("{title: Long One}")
+                appendLine("{artist: Somebody}")
+                repeat(30) { appendLine("[C]line $it") }
+            },
+        )
+        val pages = ChartLayout.paginate(ChartLayout.rows(song), 6)
+        assertTrue(pages.size > 1)
+        assertEquals(RowKind.TITLE, pages.first().first().kind)
+        for (page in pages.drop(1)) {
+            assertTrue(page.none { it.kind == RowKind.TITLE || it.kind == RowKind.CREDIT })
+        }
+    }
+
+    // The key in the heading has to be the key on the page, or it is worse than
+    // no heading at all.
+    @Test
+    fun `the key in the heading follows a transposition`() {
+        val song = SongParser.parse("{title: Test}\n{key: C}\n[C]Words [G]here")
+        val moved = Transposer.transpose(song, TransposeRequest(semitones = 2)).song
+        val credit = ChartLayout.rows(moved).first { it.kind == RowKind.CREDIT }
+        assertTrue(credit.text, credit.text.contains("Key of D"))
+    }
+
+    @Test
+    fun `a capo is named in the heading`() {
+        val song = SongParser.parse("{title: Test}\n{key: G}\n[G]Words [C]here")
+        val moved = Transposer.transpose(song, TransposeRequest(capo = 3)).song
+        val credit = ChartLayout.rows(moved).first { it.kind == RowKind.CREDIT }
+        assertTrue(credit.text, credit.text.contains("capo 3"))
+        // A capo does not change what the audience hears, so the key does not
+        // change either.
+        assertTrue(credit.text, credit.text.contains("Key of G"))
+    }
+
+    // A plain chart has its title in the text where its author typed it.
+    // Printing ours above it would show the same line twice.
+    @Test
+    fun `a chords over lyrics chart gets no title block`() {
+        val song = SongParser.parse("Wagon Wheel\n\nC       G\nHeading down south")
+        assertEquals(ChartFormat.CHORDS_OVER_LYRICS, song.meta.format)
+        assertTrue(ChartLayout.rows(song).none { it.kind == RowKind.TITLE })
+    }
+
+    @Test
+    fun `a chordpro chart that says nothing about itself gets no title block`() {
+        val song = SongParser.parse("[C]Just some [G]chords")
+        assertEquals(ChartFormat.CHORDPRO, song.meta.format)
+        assertEquals(RowKind.CHORD_AND_LYRIC, ChartLayout.rows(song).first().kind)
+    }
+
+    // The title is drawn proportionally at its own size, so its length says
+    // nothing about how many monospaced columns the music needs.
+    @Test
+    fun `a long title does not widen the chart`() {
+        val song = SongParser.parse(
+            "{title: A Title That Is Very Much Longer Than Any Line Of This Song}\n[C]Short",
+        )
+        assertEquals(5, ChartLayout.widestRow(ChartLayout.rows(song)))
+    }
+
+    @Test
     fun `font size is fitted to the widest row and clamped`() {
         // 40 characters into 400px at 0.6px per character per sp.
         assertEquals(16.6f, ChartLayout.fitFontSize(40, 400f, 0.6f), 0.1f)

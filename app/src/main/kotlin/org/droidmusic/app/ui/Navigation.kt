@@ -19,6 +19,14 @@ sealed interface Screen {
     data object Setlists : Screen
     data class SetlistDetail(val setlistId: String) : Screen
     data object Session : Screen
+
+    /**
+     * The pre-set check. It carries no arguments because the set list being
+     * checked is not always one of this device's own - a follower checks the
+     * running order the leader sent, which has no local id - so it lives on the
+     * controller rather than in the route.
+     */
+    data object Backstage : Screen
     data object Settings : Screen
     data object FootSwitchSetup : Screen
     data object Updates : Screen

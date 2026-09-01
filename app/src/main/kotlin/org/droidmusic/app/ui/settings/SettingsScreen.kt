@@ -29,6 +29,7 @@ import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.SectionLabel
 import org.droidmusic.app.ui.common.SettingRow
 import org.droidmusic.app.ui.viewer.PageMode
+import org.droidmusic.app.ui.viewer.TapZoneConfig
 
 @Composable
 fun SettingsScreen(
@@ -63,7 +64,7 @@ fun SettingsScreen(
             SettingRow(
                 title = "Tap to turn",
                 subtitle = "Right side forward, left side back. Turn this off if you only " +
-                    "want to use a foot switch.",
+                    "want to use a foot switch - the top of the screen still opens the menu.",
                 trailing = {
                     Switch(
                         checked = settings.viewer.tapZones.tapToTurnEnabled,
@@ -282,44 +283,67 @@ fun SettingsScreen(
     }
 }
 
-/** A scale drawing of the screen, showing where a tap does what. */
+/**
+ * A scale drawing of the screen, showing where a tap does what.
+ *
+ * The menu band across the top is drawn to scale as well, and is drawn even
+ * though it cannot be changed - what it is doing here is telling somebody who
+ * has just turned tap-to-turn off that there is still a way back out of a
+ * full-screen chart.
+ */
 @Composable
 private fun TapZonePreview(settings: AppSettings) {
     val zones = settings.viewer.tapZones
     val backFirst = !zones.mirrored
 
-    Row(
+    Column(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .height(64.dp),
+            .height(84.dp),
     ) {
-        val backWeight = zones.backFraction.coerceIn(0.05f, 0.95f)
-        val zoneA = if (backFirst) "Back" else "Forward"
-        val zoneB = if (backFirst) "Forward" else "Back"
-
         Box(
             Modifier
-                .weight(backWeight)
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(zoneA, style = MaterialTheme.typography.labelMedium)
-        }
-        Box(
-            Modifier
-                .weight(1f - backWeight)
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .fillMaxWidth()
+                .weight(TapZoneConfig.MENU_BAND_FRACTION)
+                .background(MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                zoneB,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                fontWeight = FontWeight.SemiBold,
+                "Menu",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
+        }
+
+        Row(Modifier.fillMaxWidth().weight(1f - TapZoneConfig.MENU_BAND_FRACTION)) {
+            val backWeight = zones.backFraction.coerceIn(0.05f, 0.95f)
+            val zoneA = if (backFirst) "Back" else "Forward"
+            val zoneB = if (backFirst) "Forward" else "Back"
+
+            Box(
+                Modifier
+                    .weight(backWeight)
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(zoneA, style = MaterialTheme.typography.labelMedium)
+            }
+            Box(
+                Modifier
+                    .weight(1f - backWeight)
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    zoneB,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

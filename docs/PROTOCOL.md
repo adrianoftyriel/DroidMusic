@@ -102,6 +102,43 @@ different id.
 Followers resolve it against their own library by content hash, then title. See
 [FORMATS.md](FORMATS.md).
 
+### `check` — the leader asking everyone to verify tonight's charts
+
+```json
+{"type":"check","seq":20,"setlist":{"id":"…","name":"Friday at the Anchor","entries":[…]}}
+```
+
+The whole set list travels with the request rather than an id. An id means
+nothing on another device, and matching an incoming id against a list adopted
+five minutes ago is a way to check the wrong set — so what a follower checks is
+exactly what the leader sent.
+
+### `report` — a device's answer to a `check`
+
+```json
+{"type":"report","seq":5,"report":{"deviceId":"…","deviceName":"Jim's Pixel",
+ "setlistName":"Friday at the Anchor","checkedAt":1724946000000,
+ "checks":[{"index":3,"title":"Copperhead Road","state":"MISSING",
+            "detail":"Not in this library."}]}}
+```
+
+`state` is one of `READY`, `MISSING`, `UNREADABLE` or `DIFFERENT`. The last of
+those means the device has a copy that is not the same bytes as the leader's,
+which is ordinary between two people's libraries and is reported as a warning
+rather than as a fault.
+
+A whole report at a time, rather than a running commentary: a player walking in
+late produces one report, the leader's screen gains one row, and there is no
+partial state anybody has to interpret. A device that has not sent one is shown
+as not having answered — never as ready.
+
+**Neither message moved the protocol version, deliberately.** They are additive:
+a build that has never heard of them fails to decode the line, `decode` returns
+null, and it is ignored — which is right, because a device that cannot answer a
+readiness check follows page turns perfectly well. Bumping the version would
+instead refuse every older device at the door over a feature it does not need,
+which is a worse answer to a smaller problem.
+
 ### `wanted` — follower to leader, after a set list arrives
 
 ```json
@@ -310,11 +347,16 @@ answer is not to start or join a session, and every device keeps working exactly
 as it does alone. Declining the charts when asked also leaves the session working
 as it always did.
 
-**Not a general sync protocol.** It syncs a position, a running order, and — on
-a separate socket, only when asked, and only for songs in that running order —
-the chart files a follower is missing. It is not a filesystem, it does not
-reconcile edits, and nothing travels in the other direction. A follower's library
-is never read by the leader.
+**Not a general sync protocol.** It syncs a position, a running order, whether
+everyone can open it, and — on a separate socket, only when asked, and only for
+songs in that running order — the chart files a follower is missing. It is not a
+filesystem, it does not reconcile edits, and nothing travels in the other
+direction. A follower's library is never read by the leader.
+
+A `report` and a transfer are two halves of one thing and stay separate on
+purpose: the check says what a device has not got, in a message small enough to
+be sent by everybody at once, and `wanted`/`offered` moves the bytes afterwards,
+one at a time, only for what somebody asked for and agreed to receive.
 
 *An earlier version of this document said flatly that nothing but a position and
 a set list travelled here. That stopped being true when chart sharing was added,

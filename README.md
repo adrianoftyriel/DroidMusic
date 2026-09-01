@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 311 tests that run on a plain JVM; the
+band-sync and update layers are covered by 336 tests that run on a plain JVM; the
 app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -202,9 +202,18 @@ file.
 Tap the **right two thirds** to go forward, the **left third** to go back. The
 split is asymmetric on purpose: forward is what you do ninety-nine times out of
 a hundred, so it gets the larger, easier target, and the smaller back zone sits
-where a hand is least likely to brush it. A band across the top centre opens the
-controls, so no tap is ever ambiguous with a page turn. All of it is adjustable,
-including mirroring the two sides.
+where a hand is least likely to brush it. Both sides are adjustable, including
+mirroring them.
+
+**Tap the top tenth of the screen for the menu** — the full width of it, so it
+can be found in the dark at arm's length without looking. It holds the three
+things a player cannot reach while a chart fills the screen: the key it is in,
+the size of the text, and the way back out. It is a band rather than a small
+target on purpose: a target you have to aim at is one you miss, and missing it
+turns the page. That band is the one part of the tap layout that cannot be
+adjusted away, because a full-screen chart with no visible exit is the one state
+this app must never be able to reach — it still works with tap-to-turn switched
+off entirely.
 
 **Foot switches work with no setup on most pedals.** Bluetooth and USB pedals
 both present themselves to Android as HID keyboards, which means there is
@@ -283,6 +292,41 @@ leading "the". Two people rarely have byte-identical copies of the same chart:
 one has a scan, the other a ChordPro. Anything genuinely missing is named rather
 than silently dropped.
 
+### Backstage
+
+**Starting a set goes backstage first.** Every chart in the running order is
+*opened* — not looked up, opened, through exactly the code path the viewer will
+use at the downbeat, and a scan or a PDF is made to draw a page as well. The
+index is only this app's memory of a folder listing: a chart can sit in it
+perfectly while the file behind it has been renamed, left in the cloud,
+half-downloaded, or put behind a permission the provider quietly withdrew. None
+of that shows up until somebody taps the song, and by then the band is playing.
+
+If you are leading a session, everyone else checks at the same moment and their
+answers come back to your screen. What it shows is the thing that is actually
+useful: **which song, and who.** "Two devices have problems" is not something
+anyone can act on; "nobody but you has Copperhead Road" is — it means send the
+file now, or move the song.
+
+Four verdicts per chart: it opens; it is **missing** from that device; it is
+there but **will not open**, with the likely reason; or it is **a different copy**
+from the leader's — same song, different bytes, which is normal between two
+people's libraries and still worth knowing before somebody discovers a different
+repeat in bar 40.
+
+A device that has not answered is shown as not having answered, never as ready.
+And none of it blocks anything: the start button works whatever the check says,
+because a band that has decided to busk a song from memory does not need an
+app's permission.
+
+Where a session is running, a player whose check found something can **ask the
+leader for it** from this screen. Pushing the running order already offers
+whatever a library could not resolve — see [Charts that arrive with the set
+list](#charts-that-arrive-with-the-set-list) — and this is the button for
+afterwards, because the check knows something that first offer cannot: a chart
+that resolves perfectly and then will not open is invisible to it, and is exactly
+the one somebody wants a fresh copy of.
+
 ### Updating itself
 
 There is no Play Store listing, so **Settings - Check for updates** fetches the
@@ -351,12 +395,14 @@ describing precisely, because it is where this kind of feature usually fails:
   back in. Otherwise the leader and the player fight over the screen.
 
 The leader sees who is in step, who has taken over, and who does not have the
-chart at all.
+chart at all — and, before the first song, whether everyone can open every chart
+in tonight's set. See [Backstage](#backstage).
 
 ### Charts that arrive with the set list
 
 Start a session, push the running order, and any chart a band mate has not got is
-offered to them. They are asked once — how many, and how big — and then the
+offered to them — and [Backstage](#backstage) is where anybody can ask again for
+one that arrived broken. They are asked once — how many, and how big — and then the
 charts arrive while everyone is still plugging in, rather than being discovered
 missing at the top of the second song.
 
@@ -399,6 +445,13 @@ It also reads what is there and tells you about it:
 - **Chords outside the key** singled out — judged on quality as well as root, so
   the E7 in a C major song is flagged, which is the interesting chord in the
   progression and the one a root-only check misses.
+
+A ChordPro chart **opens with its title, artist and key** across the head of the
+first page, and only the first page. The key shown is the key the chart is
+currently in rather than the key the file was written in, so it follows a
+transposition and names a capo when one is set. A chords-over-lyrics chart gets
+no such heading, because its title is already in the text where its author typed
+it and printing it twice would be a bug wearing a feature's clothes.
 
 Both ChordPro (`{title:}`, `[C]inline`) and plain chords-over-lyrics are read,
 sniffed automatically rather than by file extension. Chords stay above the right
@@ -520,7 +573,7 @@ already on a phone — that install needs an uninstall first, once.
 Being specific about this, because "it builds" and "it works on stage" are
 different claims.
 
-**Tested, by 154 automated tests on the JVM.** Two of these found real bugs
+**Tested, by 336 automated tests on the JVM.** Two of these found real bugs
 during development — the pagination budget check caught a page-break rule that
 could overflow a short viewport, and the chord-word test caught a parser that
 would have rewritten the word "Add" as a chord.
@@ -534,11 +587,12 @@ would have rewritten the word "Add" as a chord.
 | Transposition | Whole-chart spelling consistency; slash basses; capo semantics; round trips at all 11 intervals |
 | Key detection | Major, minor, flat keys; survives transposition to all 12 keys; confidence ordering |
 | Analysis | Non-diatonic chords; capo suggestions; tab detection |
-| Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned |
+| Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned; the ChordPro title block on the first page only |
 | Set lists | Reorder, JSON round trip, malformed input, cross-device matching |
-| Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases |
+| Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases; a build that has never heard of a message ignores it rather than dropping the session |
 | Updates | SemVer ordering including `dev.9` against `dev.10`; a release outranking its own pre-releases; downgrades never offered; drafts and APK-less releases skipped; the debug APK never chosen; a real releases payload; checksum parsing |
-| Tap zones | The exact 1/3–2/3 split; mirroring; the controls band |
+| Tap zones | The exact 1/3–2/3 split; mirroring; the menu band across the top, including with tap-to-turn off |
+| Backstage | Every verdict and its wording; silence counted as silence; trouble grouped by song and person; reports replaced, and dropped with the device that sent them |
 | Zoom to content | Finding the printed box on a page; dust in the margin ignored; light-on-dark and warm-cast scans; content running to the edge; a page with nothing worth cropping |
 | Page detection | A squared-up page, one shot at an angle, a lamp in the corner of the frame, dark music on a light table, a dim photograph, two pages in shot, and every refusal: too small, whole-frame, and not page-shaped |
 | Foot switches | Auto-repeat; contact bounce; unmapped keys passed back to the system; learn mode |

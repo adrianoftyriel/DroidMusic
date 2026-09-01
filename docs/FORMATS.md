@@ -198,6 +198,26 @@ Chord diagrams (`{define:}`, `{chord:}`), images, the delegated environments
 and colour directives are **preserved but not drawn**. They describe a printed
 page, and this is a screen on a stand.
 
+### The title block
+
+A ChordPro chart is drawn with its **title, artist and key across the head of
+the first page**, and only the first page.
+
+It is built as rows of the chart rather than as a banner the viewer paints over
+it, which is what makes "only the first page" true for free: pagination pushes
+the music down by exactly the space the heading takes, and page two starts with
+music.
+
+The key in it is the key the chart is **currently in**, not the key the file was
+written in — the heading is built from the transposed song, so moving a chart to
+B♭ moves its heading too, and a capo is named beside it. A subtitle is shown when
+it says something the artist line does not, which is where a great many files put
+the artist.
+
+**Only ChordPro gets one.** A chords-over-lyrics chart has its title in the text
+already, at the top of the file where its author typed it; printing it a second
+time above itself would be a bug wearing a feature's clothes.
+
 ---
 
 ## Word documents

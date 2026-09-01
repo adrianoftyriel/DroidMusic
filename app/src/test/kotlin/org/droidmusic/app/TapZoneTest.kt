@@ -15,7 +15,7 @@ class TapZoneTest {
     private val width = 1200f
     private val height = 1800f
 
-    /** Below the controls band, so these taps are unambiguously page turns. */
+    /** Below the menu band, so these taps are unambiguously page turns. */
     private fun at(x: Float) = zones.actionAt(x, height * 0.8f, width, height)
 
     @Test
@@ -45,26 +45,44 @@ class TapZoneTest {
         )
     }
 
+    // The way out of a full-screen chart. It spans the whole width, because a
+    // target you have to aim at in the dark is a target you miss - and missing
+    // it turns the page.
     @Test
-    fun `the top centre opens the controls instead of turning a page`() {
-        assertEquals(PageAction.TOGGLE_CONTROLS, zones.actionAt(width / 2f, 4f, width, height))
-        // Just outside the band horizontally is still a page turn.
-        assertEquals(PageAction.NEXT_PAGE, zones.actionAt(width * 0.95f, 4f, width, height))
-        // And below it vertically.
+    fun `the top tenth opens the menu wherever it is tapped`() {
+        for (fraction in listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) {
+            assertEquals(
+                "at x=$fraction of the width",
+                PageAction.TOGGLE_CONTROLS,
+                zones.actionAt(width * fraction, 4f, width, height),
+            )
+        }
+        // Right on the line, and just under it.
+        assertEquals(
+            PageAction.TOGGLE_CONTROLS,
+            zones.actionAt(width / 2f, height * TapZoneConfig.MENU_BAND_FRACTION, width, height),
+        )
+        assertEquals(
+            PageAction.NEXT_PAGE,
+            zones.actionAt(width / 2f, height * 0.11f, width, height),
+        )
         assertEquals(
             PageAction.NEXT_PAGE,
             zones.actionAt(width / 2f, height * 0.5f, width, height),
         )
     }
 
+    // With tap to turn off the screen is a foot switch's business - except for
+    // the menu, which is the only way back out of it.
     @Test
-    fun `tapping does nothing when tap to turn is off, except the controls`() {
+    fun `tapping does nothing when tap to turn is off, except the menu`() {
         val pedalOnly = zones.copy(tapToTurnEnabled = false)
         assertEquals(PageAction.NONE, pedalOnly.actionAt(width - 1f, height * 0.8f, width, height))
         assertEquals(
             PageAction.TOGGLE_CONTROLS,
             pedalOnly.actionAt(width / 2f, 4f, width, height),
         )
+        assertEquals(PageAction.TOGGLE_CONTROLS, pedalOnly.actionAt(1f, 4f, width, height))
     }
 
     @Test

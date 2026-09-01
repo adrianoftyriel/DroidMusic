@@ -12,8 +12,19 @@ import org.droidmusic.app.input.PageAction
  * larger, easier target, and the smaller back zone is on the side your hand is
  * least likely to brush while turning a page in a hurry.
  *
- * A small centre strip at the top opens the controls, so the transport and the
- * set list are reachable without a tap ever being ambiguous with a page turn.
+ * Above all of that, the top tenth of the screen - the full width of it - opens
+ * the menu instead of turning a page. It is a band rather than a small centre
+ * strip because it has to be findable in the dark, at arm's length, without
+ * looking; a strip you have to aim at is a strip that turns the page by mistake
+ * when you miss it. Ten percent of a phone held in portrait is about a
+ * fingertip and a half, which is enough to hit and small enough that it is not
+ * in the way of the music.
+ *
+ * That band is deliberately **not** configurable. Every control it opens -
+ * transposition, text size, the way out - is also reachable from the menu it
+ * opens, so nothing is lost by fixing it; and a player who had shrunk it to
+ * nothing would be left in a full-screen chart with no visible way out, which is
+ * the one state this app must never be able to reach.
  */
 @Serializable
 data class TapZoneConfig(
@@ -21,10 +32,6 @@ data class TapZoneConfig(
     val backFraction: Float = DEFAULT_BACK_FRACTION,
     /** Swap the two zones, for anyone who reads a screen from the other side. */
     val mirrored: Boolean = false,
-    /** Fraction of the height, from the top, that opens the controls instead. */
-    val controlsBandFraction: Float = DEFAULT_CONTROLS_BAND,
-    /** Horizontal extent of that band, centred. */
-    val controlsBandWidthFraction: Float = DEFAULT_CONTROLS_WIDTH,
     val tapToTurnEnabled: Boolean = true,
 ) {
     /**
@@ -36,10 +43,7 @@ data class TapZoneConfig(
         val relX = (x / width).coerceIn(0f, 1f)
         val relY = (y / height).coerceIn(0f, 1f)
 
-        if (relY <= controlsBandFraction) {
-            val halfBand = controlsBandWidthFraction / 2f
-            if (relX in (0.5f - halfBand)..(0.5f + halfBand)) return PageAction.TOGGLE_CONTROLS
-        }
+        if (relY <= MENU_BAND_FRACTION) return PageAction.TOGGLE_CONTROLS
 
         if (!tapToTurnEnabled) return PageAction.NONE
 
@@ -50,7 +54,8 @@ data class TapZoneConfig(
 
     companion object {
         const val DEFAULT_BACK_FRACTION = 1f / 3f
-        const val DEFAULT_CONTROLS_BAND = 0.12f
-        const val DEFAULT_CONTROLS_WIDTH = 0.34f
+
+        /** The share of the height, from the top, that opens the menu. */
+        const val MENU_BAND_FRACTION = 0.10f
     }
 }

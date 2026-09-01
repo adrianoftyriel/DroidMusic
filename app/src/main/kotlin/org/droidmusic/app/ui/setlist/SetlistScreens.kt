@@ -206,6 +206,7 @@ fun SetlistDetailScreen(
     songFor: (String) -> SongRef?,
     onBack: () -> Unit,
     onPlay: (Int) -> Unit,
+    onStartSet: () -> Unit,
     onAddSongs: () -> Unit,
 ) {
     // The order under the finger. The saved one comes back through a file write
@@ -264,11 +265,21 @@ fun SetlistDetailScreen(
             return@Column
         }
 
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(onClick = { onPlay(0) }) { Text("Start the set") }
+        // Starting the set goes backstage first, rather than straight into the
+        // first song. It is one tap in the way, once a night, in exchange for
+        // finding out that the bass player's copy of song four is missing while
+        // there is still time to send it.
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onStartSet) { Text("Start the set") }
+                TextButton(onClick = { onPlay(0) }) { Text("Straight to song one") }
+            }
+            Text(
+                "Backstage checks every chart in this list opens - on this device, and on " +
+                    "everyone else's if you are leading a session.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {

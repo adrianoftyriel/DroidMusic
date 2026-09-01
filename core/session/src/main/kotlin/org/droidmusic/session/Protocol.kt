@@ -93,6 +93,29 @@ data class SetlistPush(
 ) : Message
 
 /**
+ * The leader asking everyone to check they can actually open tonight's charts.
+ *
+ * The whole set list travels with the request rather than an id, because an id
+ * means nothing on another device - and matching an incoming id against a list
+ * adopted five minutes ago is a way to check the wrong set. What the follower
+ * checks is exactly what the leader sent.
+ */
+@Serializable
+@SerialName("check")
+data class CheckRequest(
+    override val seq: Long,
+    val setlist: Setlist,
+) : Message
+
+/** A device's answer to [CheckRequest]. */
+@Serializable
+@SerialName("report")
+data class CheckReport(
+    override val seq: Long,
+    val report: BackstageReport,
+) : Message
+
+/**
  * Sent every few seconds even when nothing changes.
  *
  * A TCP socket whose far end has walked out of range does not report an error;
@@ -205,13 +228,15 @@ data class Goodbye(override val seq: Long, val reason: String? = null) : Message
 /**
  * The version two peers must agree on.
  *
- * Still 1 with chart sharing added, on purpose. A bump refuses every device that
- * has not updated - see [Wire.isCompatible] - which would mean a band could not
- * play together halfway through updating, and the cost of that is far higher
- * than the cost of a follower quietly not offering to fetch charts. The addition
- * is built so that it degrades instead: an unknown message decodes to null and
- * is ignored, and the new [Welcome.filePort] reads as zero on a build that never
- * sent it.
+ * Still 1 with chart sharing and the backstage check added, on purpose. A bump
+ * refuses every device that has not updated - see [Wire.isCompatible] - which
+ * would mean a band could not play together halfway through updating, and the
+ * cost of that is far higher than the cost of a follower quietly not offering to
+ * fetch charts or not answering a readiness check. Every addition is built so
+ * that it degrades instead: an unknown message (`check`, `report`, `wanted`,
+ * `offered`) decodes to null and is ignored, and the new [Welcome.filePort]
+ * reads as zero on a build that never sent it. A device that cannot answer a
+ * check is shown on the leader's screen as not having answered, never as ready.
  */
 const val PROTOCOL_VERSION = 1
 

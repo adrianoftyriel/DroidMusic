@@ -25,6 +25,14 @@ data class LeaderState(
     val followers: List<Follower> = emptyList(),
     val position: Position? = null,
     val seq: Long = 0,
+    /**
+     * Answers to the last backstage check, one per device that has replied.
+     *
+     * Cleared when a new check is asked for rather than merged into, so what is
+     * on the leader's screen is always an answer about tonight's set list and
+     * never a stale one about last week's.
+     */
+    val reports: List<BackstageReport> = emptyList(),
 ) {
     /** Followers who are not on the leader's page, for the "who is lost" indicator. */
     fun outOfStep(): List<Follower> {
@@ -33,6 +41,12 @@ data class LeaderState(
     }
 
     fun missingTheSong(): List<Follower> = followers.filter { it.missingSong }
+
+    /** Followers who have not answered the check yet. */
+    fun awaitingReport(): List<Follower> {
+        val answered = reports.map { it.deviceId }.toSet()
+        return followers.filterNot { it.deviceId in answered }
+    }
 }
 
 object LeaderSession {
@@ -62,8 +76,10 @@ object LeaderSession {
         )
     }
 
-    fun withoutFollower(state: LeaderState, deviceId: String): LeaderState =
-        state.copy(followers = state.followers.filterNot { it.deviceId == deviceId })
+    fun withoutFollower(state: LeaderState, deviceId: String): LeaderState = state.copy(
+        followers = state.followers.filterNot { it.deviceId == deviceId },
+        reports = state.reports.filterNot { it.deviceId == deviceId },
+    )
 
     fun withStatus(state: LeaderState, status: FollowerStatus, now: Long): LeaderState {
         val updated = state.followers.map { follower ->
@@ -83,8 +99,35 @@ object LeaderSession {
         return state.copy(followers = updated)
     }
 
-    fun evictStale(state: LeaderState, now: Long): LeaderState =
-        state.copy(followers = state.followers.filter { now - it.lastSeenAt <= FOLLOWER_TIMEOUT_MS })
+    /**
+     * Files one device's answer to the backstage check.
+     *
+     * Replaces any previous answer from the same device rather than adding to
+     * it: a player who fetches the missing chart and checks again should replace
+     * the row that said it was missing, not sit beside it.
+     */
+    fun withReport(state: LeaderState, report: BackstageReport): LeaderState = state.copy(
+        reports = state.reports.filterNot { it.deviceId == report.deviceId } + report,
+    )
+
+    /** A fresh check: the old answers are about a set list nobody is playing now. */
+    fun clearReports(state: LeaderState): LeaderState = state.copy(reports = emptyList())
+
+    /**
+     * Drops followers that have gone quiet, and their reports with them.
+     *
+     * The report goes because the screen counts answers against connected
+     * devices: leaving a departed player's "all present" behind would report the
+     * band as more ready than it is.
+     */
+    fun evictStale(state: LeaderState, now: Long): LeaderState {
+        val alive = state.followers.filter { now - it.lastSeenAt <= FOLLOWER_TIMEOUT_MS }
+        val ids = alive.map { it.deviceId }.toSet()
+        return state.copy(
+            followers = alive,
+            reports = state.reports.filter { it.deviceId in ids },
+        )
+    }
 
     /**
      * Advances the leader to a new position and produces the message to send.

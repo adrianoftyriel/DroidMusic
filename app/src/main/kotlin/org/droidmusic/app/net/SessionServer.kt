@@ -22,6 +22,8 @@ import org.droidmusic.library.Setlist
 import org.droidmusic.session.ChartShare
 import org.droidmusic.session.ChartsOffered
 import org.droidmusic.session.ChartsWanted
+import org.droidmusic.session.CheckReport
+import org.droidmusic.session.CheckRequest
 import org.droidmusic.session.Goodbye
 import org.droidmusic.session.Hello
 import org.droidmusic.session.LeaderSession
@@ -140,6 +142,9 @@ class SessionServer(
                             message,
                             System.currentTimeMillis(),
                         )
+                    }
+                    is CheckReport -> {
+                        _state.value = LeaderSession.withReport(_state.value, message.report)
                     }
                     else -> Unit
                 }
@@ -271,6 +276,19 @@ class SessionServer(
         _state.value = next
         broadcast(position)
         return position
+    }
+
+    /**
+     * Asks every follower whether they can open tonight's charts.
+     *
+     * The answers already on screen are thrown away first. They are about
+     * whatever was checked last, and a stale "all present" is the one thing this
+     * screen must never show.
+     */
+    fun requestCheck(setlist: Setlist) {
+        val (next, seq) = LeaderSession.nextSeq(_state.value)
+        _state.value = LeaderSession.clearReports(next)
+        broadcast(CheckRequest(seq, setlist))
     }
 
     fun pushSetlist(setlist: Setlist) {

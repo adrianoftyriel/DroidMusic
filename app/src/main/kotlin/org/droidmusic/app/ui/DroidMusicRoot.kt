@@ -30,6 +30,8 @@ import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.input.PageAction
 import org.droidmusic.app.capture.CaptureController
 import org.droidmusic.app.capture.CaptureScreen
+import org.droidmusic.app.ui.backstage.BackstageController
+import org.droidmusic.app.ui.backstage.BackstageScreen
 import org.droidmusic.app.ui.library.LibraryController
 import org.droidmusic.app.ui.library.LibraryScreen
 import org.droidmusic.app.ui.session.SessionCoordinator
@@ -46,6 +48,8 @@ import org.droidmusic.app.update.UpdatesScreen
 import org.droidmusic.app.ui.viewer.ViewerControls
 import org.droidmusic.app.ui.viewer.ViewerController
 import org.droidmusic.app.ui.viewer.ViewerSurface
+import org.droidmusic.library.Setlist
+import org.droidmusic.library.SetlistCodec
 import org.droidmusic.library.SongRef
 
 /**
@@ -106,12 +110,26 @@ fun DroidMusicRoot(
         ViewerController(context = context, scope = app.appScope, library = app.library)
     }
 
+    val backstageController = remember {
+        BackstageController(
+            context = context,
+            scope = app.appScope,
+            library = app.library,
+            settings = app.settings,
+        )
+    }
+
     var controlsVisible by remember { mutableStateOf(false) }
 
     // The chart being filed into a set list, from a long press in the library.
     // Held here rather than in the library screen because the set lists are not
     // the library's business.
     var filingSong by remember { mutableStateOf<SongRef?>(null) }
+
+    // A finished check goes to the leader, if there is one. Wired here for the
+    // same reason as the viewer's position reporter: the check works identically
+    // when nobody is listening, and knows nothing about sessions.
+    backstageController.onReport = { report -> sessionCoordinator.submitReport(report) }
 
     // The viewer reports every move; the coordinator decides whether anyone else
     // needs to hear about it. Wiring it here keeps the viewer ignorant of
@@ -198,6 +216,21 @@ fun DroidMusicRoot(
         sessionCoordinator.consumePushedSetlist()
     }
 
+    // The leader has asked everyone to check tonight's charts. Followers are
+    // taken to Backstage without being asked, because the alternative is a
+    // notification nobody sees and a leader waiting on an answer that never
+    // comes. The set list checked is the one that arrived with the request.
+    val requestedCheck by sessionCoordinator.requestedCheck.collectAsState()
+    LaunchedEffect(requestedCheck) {
+        val list = requestedCheck ?: return@LaunchedEffect
+        backstageController.begin(
+            setlist = list,
+            requestedBy = sessionCoordinator.sessionLabel.value ?: "the leader",
+        )
+        sessionCoordinator.consumeRequestedCheck()
+        if (navigator.current != Screen.Backstage) navigator.go(Screen.Backstage)
+    }
+
     // A file arrived from outside the app - an attachment, a share, a file
     // manager. A set list is imported; anything else is added to the library,
     // because the alternative is telling somebody who just tapped a chart that
@@ -250,6 +283,31 @@ fun DroidMusicRoot(
 
     BackHandler(enabled = navigator.canGoBack || controlsVisible) {
         if (controlsVisible) controlsVisible = false else navigator.back()
+    }
+
+    /**
+     * Opens a set list at [position] on this device's own copies of the charts.
+     *
+     * The list passed in may have come from another phone - a leader's check
+     * request carries their running order, whose song ids mean nothing here - so
+     * every entry is matched against the local library first, by content hash and
+     * then by title. For a list this device made, that match is the identity and
+     * costs nothing.
+     */
+    fun startSetlist(list: Setlist, position: Int) {
+        val resolution = SetlistCodec.resolve(list, app.library.index.value)
+        val localised = list.copy(
+            entries = resolution.resolved.map { resolved ->
+                resolved.localSongId?.let { resolved.entry.copy(songId = it) } ?: resolved.entry
+            },
+        )
+        val entry = localised.entries.getOrNull(position) ?: return
+        viewerController.open(entry.songId, localised, position, settings.viewer.unicodeAccidentals)
+        // The leader shares the running order as soon as they start it, so
+        // nobody has to be sent a file in the ninety seconds before the first
+        // song.
+        if (sessionRole == SessionRole.LEADER) sessionCoordinator.pushSetlist(localised)
+        navigator.go(Screen.Viewer(entry.songId, localised.id, position))
     }
 
     DroidMusicTheme {
@@ -332,26 +390,47 @@ fun DroidMusicRoot(
                                 controller = setlistController,
                                 songFor = { id -> index.findById(id) },
                                 onBack = { navigator.back() },
-                                onPlay = { position ->
-                                    val entry = setlist.entries.getOrNull(position) ?: return@SetlistDetailScreen
-                                    viewerController.open(
-                                        entry.songId,
-                                        setlist,
-                                        position,
-                                        settings.viewer.unicodeAccidentals,
-                                    )
-                                    // The leader shares the running order as soon as
-                                    // they start it, so nobody has to be sent a file
-                                    // in the ninety seconds before the first song.
+                                onPlay = { position -> startSetlist(setlist, position) },
+                                onStartSet = {
+                                    backstageController.begin(setlist)
                                     if (sessionRole == SessionRole.LEADER) {
+                                        // Pushed as well as checked: a follower
+                                        // needs the running order to play from,
+                                        // and the check request is not a set list
+                                        // they keep.
                                         sessionCoordinator.pushSetlist(setlist)
+                                        sessionCoordinator.requestCheck(setlist)
                                     }
-                                    navigator.go(Screen.Viewer(entry.songId, setlist.id, position))
+                                    navigator.go(Screen.Backstage)
                                 },
                                 onAddSongs = { navigator.go(Screen.Library) },
                             )
                         }
                     }
+
+                    Screen.Backstage -> BackstageScreen(
+                        controller = backstageController,
+                        role = sessionRole,
+                        reports = leaderState?.reports.orEmpty(),
+                        followers = leaderState?.followers.orEmpty(),
+                        onStart = {
+                            backstageController.setlist?.let { startSetlist(it, 0) }
+                        },
+                        onOpenSong = { position ->
+                            backstageController.setlist?.let { startSetlist(it, position) }
+                        },
+                        onAskForMissing = {
+                            sessionCoordinator.requestCharts(backstageController.wanted())
+                            // Straight to Session, because that is where the
+                            // leader's answer lands: what it can send, the one
+                            // question about accepting it, and how the transfers
+                            // are getting on. A button whose whole result
+                            // appears on a screen the player is not looking at
+                            // has not done anything as far as they can tell.
+                            navigator.go(Screen.Session)
+                        },
+                        onBack = { navigator.back() },
+                    )
 
                     Screen.Session -> SessionScreen(
                         coordinator = sessionCoordinator,
@@ -414,6 +493,12 @@ fun DroidMusicRoot(
                         ) {
                             ViewerControls(
                                 controller = viewerController,
+                                preferences = settings.viewer,
+                                onPreferencesChange = { transform ->
+                                    app.settings.updateAsync {
+                                        it.copy(viewer = transform(it.viewer))
+                                    }
+                                },
                                 sessionStatus = sessionStatus,
                                 canRejoin = followerState?.canRejoin == true,
                                 onRejoin = { sessionCoordinator.rejoin() },
