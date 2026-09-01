@@ -1,7 +1,6 @@
 package org.droidmusic.app.ui.backstage
 
 import android.content.Context
-import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -11,8 +10,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.data.SettingsRepository
+import org.droidmusic.app.render.OpenResult
 import org.droidmusic.app.render.PageSources
 import org.droidmusic.app.render.RasterPageSource
 import org.droidmusic.library.LibraryIndex
@@ -216,37 +217,46 @@ class BackstageController(
     /**
      * Opens the chart the way the viewer will. Returns null when it worked, and
      * a sentence for the player when it did not.
+     *
+     * The wording of a failure is not invented here: [PageSources] already
+     * answers with a reason written to be read by whoever is holding the phone,
+     * and the viewer shows that same sentence when a chart will not open at the
+     * downbeat. Two screens describing one failure two different ways would be
+     * two things to learn instead of one.
      */
     private suspend fun openFailure(ref: SongRef, unicodeAccidentals: Boolean): String? =
         withContext(Dispatchers.IO) {
-            val source = runCatching {
+            val opened = runCatching {
                 PageSources.open(context, ref, unicodeAccidentals)
-            }.getOrNull() ?: return@withContext cannotOpen(ref)
+            }.getOrElse { OpenResult.Failed(describeFailure(ref)) }
 
-            try {
-                if (source.pageCount <= 0) return@withContext cannotOpen(ref)
-                // A picture that will not draw is the failure a page count cannot
-                // see: a half-downloaded scan opens, reports one page, and shows
-                // nothing. Drawing it small is cheap and settles it.
-                if (source is RasterPageSource && source.render(0, PROBE_PX, PROBE_PX) == null) {
-                    return@withContext "The file is there but the page will not draw. It may " +
-                        "have been only partly downloaded."
+            when (opened) {
+                is OpenResult.Failed -> opened.reason
+
+                is OpenResult.Ok -> {
+                    val source = opened.source
+                    try {
+                        when {
+                            source.pageCount <= 0 -> describeFailure(ref)
+
+                            // A picture that will not draw is the failure a page
+                            // count cannot see: a half-downloaded scan opens,
+                            // reports one page, and shows nothing. Drawing it
+                            // small is cheap and settles it.
+                            source is RasterPageSource &&
+                                source.render(0, PROBE_PX, PROBE_PX) == null -> describeFailure(ref)
+
+                            else -> null
+                        }
+                    } finally {
+                        runCatching { source.close() }
+                    }
                 }
-                null
-            } finally {
-                runCatching { source.close() }
             }
         }
 
-    private fun cannotOpen(ref: SongRef): String {
-        val scheme = runCatching { Uri.parse(ref.uri).scheme }.getOrNull()
-        return if (scheme == "file") {
-            "${ref.displayName} would not open. The file may have been moved or deleted."
-        } else {
-            "${ref.displayName} would not open. If it lives in a cloud folder it may need to " +
-                "be made available offline, or the app's access to that folder may have lapsed."
-        }
-    }
+    private suspend fun describeFailure(ref: SongRef): String =
+        DocumentSources.describeOpenFailure(context.contentResolver, ref)
 
     companion object {
         /**
