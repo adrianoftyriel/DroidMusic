@@ -16,7 +16,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.library.Setlist
+import org.droidmusic.session.ChartShare
+import org.droidmusic.session.ChartsOffered
+import org.droidmusic.session.ChartsWanted
 import org.droidmusic.session.Goodbye
 import org.droidmusic.session.Hello
 import org.droidmusic.session.LeaderSession
@@ -47,6 +51,15 @@ class SessionServer(
     private val sessionName: String,
     private val leaderName: String,
     private val discovery: SessionDiscovery?,
+    /**
+     * The library charts are offered out of, and the socket they travel on.
+     *
+     * Both optional, and a leader without them simply never offers a chart: the
+     * port it advertises stays zero, which is exactly what a follower sees from
+     * a build that predates chart sharing.
+     */
+    private val library: LibraryRepository? = null,
+    private val chartServer: ChartServer? = null,
 ) {
     private val connections = ConcurrentHashMap<String, Connection>()
     private var serverSocket: ServerSocket? = null
@@ -76,6 +89,10 @@ class SessionServer(
         socket.bind(InetSocketAddress(0))
         serverSocket = socket
         _port.value = socket.localPort
+
+        // Started before the session is advertised, so the port is real by the
+        // time the first follower is welcomed.
+        runCatching { chartServer?.start() }
 
         registration = discovery?.advertise(sessionName, leaderName, socket.localPort)
 
@@ -113,6 +130,7 @@ class SessionServer(
                 val line = runCatching { reader.readLine() }.getOrNull() ?: break
                 when (val message = Wire.decode(line)) {
                     is Hello -> onHello(message, connection)
+                    is ChartsWanted -> onWanted(message, connection)
                     is FollowerStatus -> {
                         _state.value = LeaderSession.withStatus(
                             _state.value,
@@ -164,10 +182,34 @@ class SessionServer(
 
         send(
             connection,
-            Welcome(seq = 0, accepted = true, sessionName = sessionName, leaderName = leaderName),
+            Welcome(
+                seq = 0,
+                accepted = true,
+                sessionName = sessionName,
+                leaderName = leaderName,
+                filePort = chartServer?.port?.value ?: 0,
+            ),
         )
         // Bring the newcomer straight to where the band already is.
         _state.value.position?.let { send(connection, it) }
+    }
+
+    /**
+     * Answers a follower asking which of the charts it is missing this leader
+     * can supply.
+     *
+     * Only an answer, never an offer made first. The leader does not decide what
+     * another device is short of - the follower works that out from the set list
+     * it was sent and asks, which is what keeps a leader from being able to push
+     * a file at anybody. See [ChartShare].
+     */
+    private fun onWanted(wanted: ChartsWanted, connection: Connection) {
+        val index = library?.index?.value ?: return
+        if ((chartServer?.port?.value ?: 0) == 0) return
+
+        val (next, seq) = LeaderSession.nextSeq(_state.value)
+        _state.value = next
+        send(connection, ChartsOffered(seq, ChartShare.offers(wanted.wanted, index)))
     }
 
     /** Moves the session to a new position and tells everyone. */
@@ -228,6 +270,7 @@ class SessionServer(
         _state.value = next
         broadcast(Goodbye(seq, "Session ended"))
 
+        chartServer?.stop()
         registration?.stop()
         registration = null
         acceptJob?.cancel()

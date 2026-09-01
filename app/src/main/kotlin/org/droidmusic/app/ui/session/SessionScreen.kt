@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -36,6 +37,8 @@ import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.Pill
 import org.droidmusic.app.ui.common.SectionLabel
 import org.droidmusic.session.FollowMode
+import org.droidmusic.session.ChartShare
+import org.droidmusic.session.ChartSharing
 import org.droidmusic.session.LinkState
 
 /**
@@ -56,6 +59,7 @@ fun SessionScreen(
     val followerState by coordinator.followerState.collectAsState()
     val message by coordinator.message.collectAsState()
     val sessionLabel by coordinator.sessionLabel.collectAsState()
+    val sharing by coordinator.sharing.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var sessionName by remember { mutableStateOf("") }
@@ -228,6 +232,13 @@ fun SessionScreen(
             SessionRole.FOLLOWER -> Column(Modifier.fillMaxSize()) {
                 SectionLabel("You are following")
                 val state = followerState
+
+                ChartSharingPanel(
+                    sharing = sharing,
+                    onAccept = { coordinator.acceptCharts() },
+                    onDecline = { coordinator.declineCharts() },
+                )
+
                 Column(
                     Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -277,6 +288,101 @@ fun SessionScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The charts the leader has that this device has not.
+ *
+ * Asked once. The first offer of a session raises the question and everything
+ * after it is taken on that answer - a second set list, a reconnection, a song
+ * added halfway through. Being asked again between songs is worse than either
+ * answer, and this is a screen somebody looks at while a room waits.
+ *
+ * What is shown before agreeing is the count and the weight, because "three
+ * charts" and "three charts, 60 MB" are different questions on a phone at a
+ * venue with somebody else's wifi.
+ */
+@Composable
+private fun ChartSharingPanel(
+    sharing: ChartSharing,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    val pending = sharing.pending
+    val active = sharing.active
+    val failed = sharing.failed
+
+    if (pending.isEmpty() && active.isEmpty() && failed.isEmpty() && sharing.refused.isEmpty()) return
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (pending.isNotEmpty() && !sharing.answered) {
+            val charts = if (pending.size == 1) "1 chart" else "${pending.size} charts"
+            val weight = ChartShare.megabytes(pending.sumOf { it.sizeBytes })
+            Text(
+                "The leader has $charts you have not got ($weight).",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                pending.take(4).joinToString(", ") { it.title } +
+                    if (pending.size > 4) " and ${pending.size - 4} more" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onAccept) { Text("Get them") }
+                OutlinedButton(onClick = onDecline) { Text("Not now") }
+            }
+        }
+
+        for (transfer in active) {
+            Text(
+                "Fetching ${transfer.offer.title}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // A chart whose size nobody declared gets an indeterminate bar rather
+            // than a bar stuck at nothing.
+            if (transfer.offer.sizeBytes > 0) {
+                LinearProgressIndicator(
+                    progress = { transfer.fraction },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        }
+
+        if (sharing.arrived > 0 && active.isEmpty()) {
+            Text(
+                "${sharing.arrived} arrived.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // Named rather than dropped. A chart that silently did not arrive is the
+        // failure this whole thing exists to prevent, and finding out on stage is
+        // a different evening from being told at a soundcheck.
+        for (transfer in failed) {
+            Text(
+                "${transfer.offer.title}: ${transfer.failed}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        for (refusal in sharing.refused) {
+            Text(
+                "${refusal.offer.title}: ${refusal.reason}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

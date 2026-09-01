@@ -7,10 +7,10 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Process
 import android.provider.DocumentsContract
-import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.droidmusic.library.ContentHash
 import org.droidmusic.library.DocxText
 import org.droidmusic.library.FileKind
 import org.droidmusic.library.SongRef
@@ -435,7 +435,13 @@ object DocumentSources {
                             contentHash = hashOf(text.toByteArray()),
                         )
                     }
-                    else -> song.copy(contentHash = hashOfFile(context.contentResolver, Uri.parse(song.uri)))
+                    else -> song.copy(
+                        contentHash = hashOfFile(
+                            context.contentResolver,
+                            Uri.parse(song.uri),
+                            song.sizeBytes,
+                        ),
+                    )
                 }
             }.getOrDefault(song)
         }
@@ -563,27 +569,27 @@ object DocumentSources {
      * *and* their exact length is not a thing that happens in a music library,
      * and the set list matcher falls back to the title anyway.
      */
-    fun hashOfFile(resolver: ContentResolver, uri: Uri, prefixBytes: Int = 1024 * 1024): String? =
-        runCatching {
-            resolver.openInputStream(uri)?.use { stream ->
-                val digest = MessageDigest.getInstance("SHA-256")
-                val buffer = ByteArray(64 * 1024)
-                var total = 0
-                while (total < prefixBytes) {
-                    val read = stream.read(buffer, 0, minOf(buffer.size, prefixBytes - total))
-                    if (read <= 0) break
-                    digest.update(buffer, 0, read)
-                    total += read
-                }
-                digest.update(total.toString().toByteArray())
-                digest.digest().toHex()
-            }
-        }.getOrNull()
+    /**
+     * The fingerprint of a chart, as [ContentHash] defines it: the first
+     * megabyte and the file's length.
+     *
+     * [declaredLength] is what the library already knows - a provider reports it
+     * during a scan and a local file always has one. Passing it in matters: it
+     * is what distinguishes two large files that begin the same way, and when it
+     * is not known the stream has to be drained to find out.
+     */
+    fun hashOfFile(
+        resolver: ContentResolver,
+        uri: Uri,
+        declaredLength: Long = 0,
+        prefixBytes: Int = ContentHash.PREFIX_BYTES,
+    ): String? = runCatching {
+        resolver.openInputStream(uri)?.use { stream ->
+            ContentHash.of(stream, declaredLength, prefixBytes)
+        }
+    }.getOrNull()
 
-    fun hashOf(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
-
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+    fun hashOf(bytes: ByteArray): String = ContentHash.of(bytes)
 
     /**
      * A song id that survives a rescan.

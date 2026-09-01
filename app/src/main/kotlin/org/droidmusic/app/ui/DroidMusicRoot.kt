@@ -76,6 +76,8 @@ fun DroidMusicRoot(
             discovery = app.discovery,
             settings = app.settings,
             appVersion = DroidMusicApp.VERSION,
+            context = context,
+            library = app.library,
         )
     }
 

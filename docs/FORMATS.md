@@ -397,11 +397,17 @@ The fallback is not a nicety. Two people rarely have byte-identical copies of
 the same chart — one has a scan, the other a ChordPro of the same song — and
 matching those is the entire point.
 
-The hash covers the first megabyte plus the file length. Hashing a 60 MB scanned
-songbook in full, for every file, on a phone, to decide whether two devices have
-the same chart is not a trade worth making; a collision needs two different
-charts sharing both their first megabyte and their exact length, and the title
-fallback catches it anyway.
+The hash covers the first megabyte **and the file's length**. Hashing a 60 MB
+scanned songbook in full, for every file, on a phone, to decide whether two
+devices have the same chart is not a trade worth making; a collision needs two
+different charts sharing both their first megabyte and their exact length, and
+the title fallback catches it anyway.
+
+The length is load-bearing, not a detail. Without it the prefix is the whole
+fingerprint, and every file over a megabyte that opens the same way is the same
+file as far as matching is concerned - which for a library of scans from one
+songbook, each starting on the same cover page, is not hypothetical. See
+`ContentHash`, which has a test for exactly that pair.
 
 Anything genuinely missing is **named** on import rather than silently dropped.
 Importing a list that refers to charts you do not have yet is the normal case,

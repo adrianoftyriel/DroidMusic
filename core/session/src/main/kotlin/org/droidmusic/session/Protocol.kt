@@ -3,6 +3,7 @@ package org.droidmusic.session
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.droidmusic.library.FileKind
 import org.droidmusic.library.Setlist
 
 /**
@@ -49,6 +50,16 @@ data class Welcome(
     val leaderName: String,
     val protocolVersion: Int = PROTOCOL_VERSION,
     val reason: String? = null,
+    /**
+     * The port the leader serves charts on, or zero when it is not offering to.
+     *
+     * Defaulted rather than required, which is what makes this addition
+     * invisible to an older build: a leader that predates chart sharing sends no
+     * such field, it decodes as zero, and the follower simply never asks. The
+     * protocol version is deliberately not bumped for the same reason - see
+     * [PROTOCOL_VERSION].
+     */
+    val filePort: Int = 0,
 ) : Message
 
 /**
@@ -111,11 +122,97 @@ data class FollowerStatus(
     val missingSong: Boolean = false,
 ) : Message
 
+/**
+ * A follower asking for the charts it has not got.
+ *
+ * Sent after a set list arrives and the follower has failed to resolve some of
+ * it. The leader is asked by content hash and title - the same two things a set
+ * list entry already carries - because a song's id is meaningful only on the
+ * device that indexed it.
+ */
+@Serializable
+@SerialName("wanted")
+data class ChartsWanted(
+    override val seq: Long,
+    val deviceId: String,
+    val wanted: List<ChartWant>,
+) : Message
+
+@Serializable
+data class ChartWant(val contentHash: String? = null, val title: String)
+
+/**
+ * The leader answering with what it can actually send.
+ *
+ * Sizes are included because the follower is about to be asked whether to accept
+ * them, and "three charts" is a different question from "three charts, 60 MB" on
+ * a phone at a venue.
+ */
+@Serializable
+@SerialName("offered")
+data class ChartsOffered(
+    override val seq: Long,
+    val offers: List<ChartOffer>,
+) : Message
+
+@Serializable
+data class ChartOffer(
+    /** Identifies the chart for the duration of the session. Also what the bytes are checked against. */
+    val contentHash: String,
+    val title: String,
+    val displayName: String,
+    val kind: FileKind,
+    val sizeBytes: Long,
+)
+
+/**
+ * One request on the file channel: send me this chart, starting here.
+ *
+ * The offset is what makes a dropped transfer resumable. A forty-megabyte scan
+ * over a pub's wifi will not always arrive first time, and starting again from
+ * nothing each time is how it never arrives at all.
+ */
+@Serializable
+data class ChartFetch(val contentHash: String, val offset: Long = 0)
+
+/**
+ * The leader's answer on the file channel, as one JSON line, followed by
+ * [length] raw bytes when [ok].
+ *
+ * Raw rather than base64: a scan is large enough that a third again in size and
+ * a decode pass on a phone are both worth avoiding, and this channel carries
+ * nothing else that framing has to be shared with.
+ */
+@Serializable
+data class ChartFetchHeader(
+    val ok: Boolean,
+    val contentHash: String = "",
+    val displayName: String = "",
+    val kind: FileKind = FileKind.UNKNOWN,
+    /** The whole chart's size, not the size of this response. */
+    val sizeBytes: Long = 0,
+    val offset: Long = 0,
+    /** How many bytes follow this line. */
+    val length: Long = 0,
+    val reason: String? = null,
+)
+
 /** The leader closing the session cleanly, as opposed to vanishing. */
 @Serializable
 @SerialName("bye")
 data class Goodbye(override val seq: Long, val reason: String? = null) : Message
 
+/**
+ * The version two peers must agree on.
+ *
+ * Still 1 with chart sharing added, on purpose. A bump refuses every device that
+ * has not updated - see [Wire.isCompatible] - which would mean a band could not
+ * play together halfway through updating, and the cost of that is far higher
+ * than the cost of a follower quietly not offering to fetch charts. The addition
+ * is built so that it degrades instead: an unknown message decodes to null and
+ * is ignored, and the new [Welcome.filePort] reads as zero on a build that never
+ * sent it.
+ */
 const val PROTOCOL_VERSION = 1
 
 /** The mDNS service type the leader advertises and followers browse for. */

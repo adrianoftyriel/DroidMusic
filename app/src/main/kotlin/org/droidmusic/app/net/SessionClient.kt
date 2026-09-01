@@ -25,6 +25,9 @@ import org.droidmusic.session.Message
 import org.droidmusic.session.Ping
 import org.droidmusic.session.Pong
 import org.droidmusic.session.Position
+import org.droidmusic.session.ChartWant
+import org.droidmusic.session.ChartsOffered
+import org.droidmusic.session.ChartsWanted
 import org.droidmusic.session.SetlistPush
 import org.droidmusic.session.Welcome
 import org.droidmusic.session.Wire
@@ -41,6 +44,15 @@ import org.droidmusic.session.LocalPosition
  * the viewer keeps working the whole time, which is the requirement that made
  * this feature worth building rather than a nice idea.
  */
+/**
+ * Where a leader is serving charts, once it has said that it is.
+ *
+ * A separate address from the control connection's on purpose - see
+ * [ChartServer] for why a transfer must not share the socket a page turn
+ * travels on.
+ */
+data class ChartSource(val host: String, val port: Int)
+
 class SessionClient(
     private val scope: CoroutineScope,
     private val deviceId: String,
@@ -70,6 +82,18 @@ class SessionClient(
 
     private val _setlistPushes = MutableSharedFlow<SetlistPush>(extraBufferCapacity = 8)
     val setlistPushes: SharedFlow<SetlistPush> = _setlistPushes.asSharedFlow()
+
+    private val _chartOffers = MutableSharedFlow<ChartsOffered>(extraBufferCapacity = 8)
+
+    /** What the leader says it can send of the charts this device asked for. */
+    val chartOffers: SharedFlow<ChartsOffered> = _chartOffers.asSharedFlow()
+
+    /**
+     * Where charts can be fetched from, or null when this leader is not offering
+     * any - which is also what an older build looks like.
+     */
+    private val _chartSource = MutableStateFlow<ChartSource?>(null)
+    val chartSource: StateFlow<ChartSource?> = _chartSource.asStateFlow()
 
     private val _sessionName = MutableStateFlow<String?>(null)
     val sessionName: StateFlow<String?> = _sessionName.asStateFlow()
@@ -137,12 +161,17 @@ class SessionClient(
                         everConnected = true
                         _lastError.value = null
                         _sessionName.value = message.sessionName
+                        _chartSource.value = message.filePort
+                            .takeIf { it > 0 }
+                            ?.let { ChartSource(session.host, it) }
                         dispatch(FollowerEvent.Connected(message.sessionName), ::send)
                     }
 
                     is Position -> dispatch(FollowerEvent.LeaderPosition(message), ::send)
 
                     is SetlistPush -> _setlistPushes.tryEmit(message)
+
+                    is ChartsOffered -> _chartOffers.tryEmit(message)
 
                     is Ping -> send(Pong(nextSeq(), message.sentAt, deviceId))
 
@@ -203,6 +232,18 @@ class SessionClient(
             }
             _effects.tryEmit(effect)
         }
+    }
+
+    /**
+     * Asks the leader which of these charts it can send.
+     *
+     * Best effort, like every other write here: a request that does not get out
+     * because the link chose that moment to drop costs a chart that has to be
+     * fetched another way, not a session.
+     */
+    fun requestCharts(wanted: List<ChartWant>) {
+        if (wanted.isEmpty()) return
+        sendOnCurrentSocket(ChartsWanted(nextSeq(), deviceId, wanted))
     }
 
     private fun sendOnCurrentSocket(message: Message) {

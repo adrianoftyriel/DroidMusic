@@ -150,7 +150,7 @@ class CaptureController(
             kind = FileKind.PDF,
             sizeBytes = target.length(),
             modifiedAt = target.lastModified(),
-            contentHash = DocumentSources.hashOfFile(context.contentResolver, uri),
+            contentHash = DocumentSources.hashOfFile(context.contentResolver, uri, target.length()),
         )
 
         val existing = library.index.value.songsFrom(source.id)

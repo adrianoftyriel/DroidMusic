@@ -1,16 +1,24 @@
 package org.droidmusic.app.ui.session
 
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.data.SettingsRepository
+import org.droidmusic.app.net.ChartFetcher
+import org.droidmusic.app.net.ChartServer
 import org.droidmusic.app.net.DiscoveredSession
 import org.droidmusic.app.net.SessionClient
 import org.droidmusic.app.net.SessionDiscovery
 import org.droidmusic.app.net.SessionServer
 import org.droidmusic.library.Setlist
+import org.droidmusic.session.ChartOffer
+import org.droidmusic.session.ChartSharing
+import org.droidmusic.session.ChartShare
+import org.droidmusic.session.ChartTransfer
 import org.droidmusic.session.FollowMode
 import org.droidmusic.session.FollowerState
 import org.droidmusic.session.LeaderState
@@ -34,6 +42,8 @@ class SessionCoordinator(
     private val discovery: SessionDiscovery,
     private val settings: SettingsRepository,
     private val appVersion: String,
+    private val context: Context,
+    private val library: LibraryRepository,
 ) {
     private val _role = MutableStateFlow(SessionRole.NONE)
     val role: StateFlow<SessionRole> = _role.asStateFlow()
@@ -63,13 +73,27 @@ class SessionCoordinator(
     private val _pushedSetlist = MutableStateFlow<Setlist?>(null)
     val pushedSetlist: StateFlow<Setlist?> = _pushedSetlist.asStateFlow()
 
+    private val _sharing = MutableStateFlow(ChartSharing())
+
+    /** Charts the leader has offered, and how the ones being fetched are getting on. */
+    val sharing: StateFlow<ChartSharing> = _sharing.asStateFlow()
+
+    private val fetcher by lazy { ChartFetcher(context, library) }
+
     fun discoverSessions() = discovery.discover()
 
     suspend fun startLeading(sessionName: String) {
         stop()
         val current = settings.settings.value
         val leaderName = current.deviceName.ifEmpty { "Leader" }
-        val newServer = SessionServer(scope, sessionName, leaderName, discovery)
+        val newServer = SessionServer(
+            scope = scope,
+            sessionName = sessionName,
+            leaderName = leaderName,
+            discovery = discovery,
+            library = library,
+            chartServer = ChartServer(scope, context, library),
+        )
         server = newServer
         _role.value = SessionRole.LEADER
         _sessionLabel.value = sessionName
@@ -98,7 +122,13 @@ class SessionCoordinator(
         scope.launch { newClient.state.collect { _followerState.value = it } }
         scope.launch { newClient.lastError.collect { _message.value = it } }
         scope.launch {
-            newClient.setlistPushes.collect { _pushedSetlist.value = it.setlist }
+            newClient.setlistPushes.collect { push ->
+                _pushedSetlist.value = push.setlist
+                askForMissingCharts(newClient, push.setlist)
+            }
+        }
+        scope.launch {
+            newClient.chartOffers.collect { offered -> onOffered(offered.offers) }
         }
         scope.launch {
             // Only a position that should actually move this device is published.
@@ -158,6 +188,99 @@ class SessionCoordinator(
         _followerState.value?.leaderPosition?.let { _remotePosition.value = it }
     }
 
+    // ---- Charts the follower has not got ----------------------------------
+
+    /**
+     * Works out what this device is short of and asks the leader for it.
+     *
+     * Only ever asked after a set list arrives, because the set list is what
+     * says which songs tonight actually needs. A library missing a chart nobody
+     * is going to play is not a problem worth a transfer.
+     */
+    private fun askForMissingCharts(client: SessionClient, setlist: Setlist) {
+        if (client.chartSource.value == null) return
+        val wanted = ChartShare.wanted(setlist, library.index.value)
+        if (wanted.isEmpty()) return
+        client.requestCharts(wanted)
+    }
+
+    /**
+     * Holds what the leader offered until the player has answered.
+     *
+     * Asked once a session: the first offer raises the question, and whatever
+     * comes later - a second set list, a reconnection - is taken on the answer
+     * already given. Being asked again halfway through a set is worse than
+     * either answer.
+     */
+    private fun onOffered(offers: List<ChartOffer>) {
+        val already = _sharing.value
+        val fresh = offers.filterNot { offer ->
+            already.transfers.any { it.offer.contentHash == offer.contentHash } ||
+                already.pending.any { it.contentHash == offer.contentHash }
+        }
+        if (fresh.isEmpty()) return
+
+        val acceptance = ChartShare.accept(fresh)
+        _sharing.value = already.copy(
+            pending = already.pending + acceptance.accepted,
+            refused = already.refused + acceptance.refused,
+        )
+        if (already.answered) startFetching()
+    }
+
+    /** The player agreeing, once, to charts arriving on this device. */
+    fun acceptCharts() {
+        _sharing.value = _sharing.value.copy(answered = true)
+        startFetching()
+    }
+
+    /** The player declining. Nothing arrives, and nothing asks again this session. */
+    fun declineCharts() {
+        _sharing.value = _sharing.value.copy(answered = true, pending = emptyList())
+    }
+
+    private fun startFetching() {
+        val source = client?.chartSource?.value ?: return
+        val queued = _sharing.value.pending
+        if (queued.isEmpty()) return
+
+        _sharing.value = _sharing.value.copy(
+            pending = emptyList(),
+            transfers = _sharing.value.transfers + queued.map { ChartTransfer(it) },
+        )
+
+        scope.launch {
+            // One at a time. Several large transfers at once on a pub's wifi is
+            // how none of them finishes, and there is nothing to be gained by
+            // racing them - the set does not start until they are all here.
+            for (offer in queued) {
+                val outcome = fetcher.fetch(source.host, source.port, offer) { received ->
+                    updateTransfer(offer.contentHash) { it.copy(receivedBytes = received) }
+                }
+                when (outcome) {
+                    is ChartFetcher.Outcome.Installed ->
+                        updateTransfer(offer.contentHash) { it.copy(done = true) }
+                    is ChartFetcher.Outcome.Failed ->
+                        updateTransfer(offer.contentHash) { it.copy(failed = outcome.reason) }
+                }
+            }
+            // Nothing is republished here on purpose. A set list entry is
+            // resolved against the library each time it is read, and the library
+            // index is a StateFlow, so the entries that just arrived stop showing
+            // as missing the moment the charts are filed. Re-assigning the set
+            // list would emit nothing anyway - a StateFlow does not re-emit a
+            // value equal to the one it holds.
+        }
+    }
+
+    private fun updateTransfer(hash: String, change: (ChartTransfer) -> ChartTransfer) {
+        _sharing.value = _sharing.value.copy(
+            transfers = _sharing.value.transfers.map {
+                if (it.offer.contentHash == hash) change(it) else it
+            },
+        )
+    }
+
     fun clearMessage() {
         _message.value = null
     }
@@ -167,6 +290,7 @@ class SessionCoordinator(
     }
 
     fun stop() {
+        _sharing.value = ChartSharing()
         server?.stop()
         server = null
         client?.leave()

@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 284 tests that run on a plain JVM; the
+band-sync and update layers are covered by 310 tests that run on a plain JVM; the
 app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -352,6 +352,31 @@ describing precisely, because it is where this kind of feature usually fails:
 
 The leader sees who is in step, who has taken over, and who does not have the
 chart at all.
+
+### Charts that arrive with the set list
+
+Start a session, push the running order, and any chart a band mate has not got is
+offered to them. They are asked once — how many, and how big — and then the
+charts arrive while everyone is still plugging in, rather than being discovered
+missing at the top of the second song.
+
+The charts travel on a socket of their own, so a forty-megabyte scan cannot stop
+anybody's page turning while it moves, and a transfer that drops picks up where
+it stopped instead of starting again. Anything too large, or too much of it, is
+named rather than silently skipped.
+
+**It only goes one way, and only when asked.** The leader answers requests; it
+never pushes a file at anybody and never reads anybody's library. A follower asks
+only for songs in the set list it was just sent, checks what arrives against what
+was described, and files it in DroidMusic's own storage — never in your folders.
+
+**A word about the network.** Band sessions are unauthenticated by design: anyone
+on the same wifi who speaks the protocol can join one. That was a fair trade when
+a page number was all that moved, and it is a bigger one now that charts do. The
+limits are real — a capped number of capped files, under names this device
+chooses, in the app's own storage — but on a network you do not trust, the answer
+is still not to join a session. Declining when asked leaves everything else
+working. See [PROTOCOL.md](docs/PROTOCOL.md).
 
 ### Transposing, and meaning it
 

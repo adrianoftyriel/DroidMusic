@@ -58,8 +58,13 @@ Every message carries a `seq`.
 ### `welcome` — leader's answer
 
 ```json
-{"type":"welcome","seq":0,"accepted":true,"sessionName":"Anchor","leaderName":"Jim","protocolVersion":1}
+{"type":"welcome","seq":0,"accepted":true,"sessionName":"Anchor","leaderName":"Jim",
+ "protocolVersion":1,"filePort":41234}
 ```
+
+`filePort` is where charts can be fetched from, or `0` when this leader is not
+offering any — which is also exactly what a build older than chart sharing looks
+like, since it never sends the field and it decodes as zero.
 
 A mismatched `protocolVersion` is **refused** with `accepted:false` and a reason,
 rather than half-talking to a build that means something different by the same
@@ -97,6 +102,36 @@ different id.
 Followers resolve it against their own library by content hash, then title. See
 [FORMATS.md](FORMATS.md).
 
+### `wanted` — follower to leader, after a set list arrives
+
+```json
+{"type":"wanted","seq":5,"deviceId":"…","wanted":[{"contentHash":"…","title":"Wagon Wheel"}]}
+```
+
+What the follower could not resolve out of the set list it was just sent. Asked
+by hash and title, the two things a set list entry already carries; a song id is
+meaningful only on the device that indexed it.
+
+### `offered` — the leader's answer
+
+```json
+{"type":"offered","seq":16,"offers":[
+  {"contentHash":"…","title":"Wagon Wheel","displayName":"wagon-wheel.cho",
+   "kind":"CHORDPRO","sizeBytes":2048}]}
+```
+
+Only charts the leader actually has, and only ones with a content hash — the
+hash is what the receiver checks the bytes against, and something that cannot be
+checked on arrival is not sent.
+
+Sizes are included because the follower is about to ask a person whether to
+accept them, and "three charts" is a different question from "three charts,
+60 MB".
+
+**The leader never offers first.** It answers `wanted` and nothing else. A leader
+cannot push a file at anybody, which on a protocol with no identity is most of
+what makes moving files across it defensible at all.
+
 ### `ping` / `pong` — heartbeat, every 5 s
 
 ```json
@@ -127,6 +162,60 @@ have the chart at all.
 
 Distinguishes "the set is over" from "the leader vanished", which the followers
 would otherwise have to infer from silence.
+
+---
+
+## The file channel
+
+Charts travel on a **second socket**, not on the one above.
+
+The leader binds a second ephemeral port and names it in `welcome`. A follower
+opens one connection per chart, sends a request line, gets a header line, then
+reads raw bytes until the declared length or the end of the connection.
+
+```json
+→ {"contentHash":"…","offset":0}
+← {"ok":true,"contentHash":"…","displayName":"wagon-wheel.cho","kind":"CHORDPRO",
+   "sizeBytes":2048,"offset":0,"length":2048}
+← <2048 raw bytes>
+```
+
+A refusal is a header with `ok:false` and a reason, and no body.
+
+**Why a second socket and not the control one.** TCP delivers in order, so a
+large frame blocks everything queued behind it. A forty-megabyte scan on the
+control connection would stop page turns for its duration, stall the heartbeat,
+and start the follower's timeout logic deciding the leader had gone home — while
+base64 in a JSON line would also mean holding the whole file as one string on
+both devices. A page turn must never wait for a transfer, so the two do not share
+a stream.
+
+**`length` may be `-1`.** Some providers will not say how big a file is. Then the
+end of the connection is the end of the chart, and the receiver relies on the
+hash to know it got a whole one. Such a chart gets an indeterminate progress bar
+rather than one stuck at nothing.
+
+**`offset` is what makes a drop survivable.** A part-finished chart is kept and
+asked for again from where it stopped. On a pub's wifi a large file will not
+always arrive first time, and starting from nothing on every drop is how it never
+arrives at all.
+
+### What bounds it
+
+The transport has no authentication — see below — so the safety is in the rules,
+all of which live in `ChartShare` in the core with tests around them:
+
+| Bound | Why |
+|---|---|
+| Only charts the follower **asked for** | A leader cannot push a file at anybody |
+| Bytes checked against the offered hash | What arrives is what was described |
+| 64 MB a chart, 256 MB and 60 charts a session | A session cannot fill a phone |
+| The filename is **rebuilt**, never used as sent | No sender chooses a path |
+| Everything lands in the app's own storage | Never in the user's folders |
+
+What the hash check proves is that the file matches the one that was *described*.
+It cannot prove the describer was honest, because nothing in this protocol can.
+That is what the other four rows are for.
 
 ---
 
@@ -208,9 +297,25 @@ entire threat model: a page number, on a local network, for three hours. Adding
 a key exchange would mean typing a code before every rehearsal, which is a real
 cost for no real gain.
 
-If that is not acceptable for a given room — an open venue network, say — the
-answer is not to start a session, and every device keeps working exactly as it
-does alone.
+That threat model was written when a page number was all that moved. Charts
+moving changes it, and the honest statement is now this: **anyone on the network
+who speaks the protocol can present themselves as a leader**, and a follower that
+joins them will fetch charts from them. The bounds in the table above are what
+keep that to a bounded nuisance — a capped number of capped files, under names
+this device chose, in the app's own storage — rather than something worse. They
+do not make it *safe*, because a protocol with no identity cannot be.
 
-**Not a general sync protocol.** It syncs a position and a running order.
-Anything else two devices need to share travels as a file.
+If that is not acceptable for a given room — an open venue network, say — the
+answer is not to start or join a session, and every device keeps working exactly
+as it does alone. Declining the charts when asked also leaves the session working
+as it always did.
+
+**Not a general sync protocol.** It syncs a position, a running order, and — on
+a separate socket, only when asked, and only for songs in that running order —
+the chart files a follower is missing. It is not a filesystem, it does not
+reconcile edits, and nothing travels in the other direction. A follower's library
+is never read by the leader.
+
+*An earlier version of this document said flatly that nothing but a position and
+a set list travelled here. That stopped being true when chart sharing was added,
+and the sentence is corrected rather than left contradicting the code.*
