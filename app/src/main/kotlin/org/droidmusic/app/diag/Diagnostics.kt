@@ -78,9 +78,9 @@ object Diagnostics {
             appendLine()
             appendLine(
                 "This is what the app did, not what is in your files: no chart is read into " +
-                    "it and nothing is sent anywhere. It does name your device, the other " +
-                    "devices in the session, the session itself, the songs by title, and the " +
-                    "addresses those devices had on the local network.",
+                    "it, and it goes nowhere unless you send it. It names your device, the " +
+                    "other devices in the session, the session itself, the songs by title, " +
+                    "and the addresses those devices had on the local network.",
             )
             appendLine()
             if (lines.isEmpty()) {
