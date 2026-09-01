@@ -496,27 +496,37 @@ fun DroidMusicRoot(
                         versionName = DroidMusicApp.VERSION,
                     )
 
-                    Screen.Diagnostics -> DiagnosticsScreen(
-                        // Worked out here rather than inside the screen: what is
-                        // worth knowing about a device is the app's business,
-                        // and the log itself should stay a list of facts.
-                        about = listOf(
-                            "App" to DroidMusicApp.VERSION +
-                                (updateController.currentTag?.let { " ($it)" } ?: " (from source)"),
-                            "Device" to settings.deviceName.ifEmpty { "unnamed" },
-                            "Android" to "${android.os.Build.MODEL}, API ${android.os.Build.VERSION.SDK_INT}",
-                            "Session" to when (sessionRole) {
-                                SessionRole.LEADER -> "leading \"${sessionLabel ?: "?"}\" " +
-                                    "with ${leaderState?.followers?.size ?: 0} following"
-                                SessionRole.FOLLOWER -> "following \"${sessionLabel ?: "?"}\", " +
-                                    "${followerState?.link}, ${followerState?.mode}"
-                                SessionRole.NONE -> "not in a session"
-                            },
-                            "Library" to "${app.library.index.value.songs.size} charts from " +
-                                "${app.library.index.value.sources.size} sources",
-                        ),
-                        onBack = { navigator.back() },
-                    )
+                    Screen.Diagnostics -> {
+                        // Collected rather than read: the index is a flow, and
+                        // reading its value inside composition neither subscribes
+                        // nor recomposes - so the header would keep whatever
+                        // number happened to be there the first time this screen
+                        // was drawn.
+                        val index by app.library.index.collectAsState()
+                        DiagnosticsScreen(
+                            // Worked out here rather than inside the screen: what
+                            // is worth knowing about a device is the app's
+                            // business, and the log itself should stay a list of
+                            // facts.
+                            about = listOf(
+                                "App" to DroidMusicApp.VERSION +
+                                    (updateController.currentTag?.let { " ($it)" } ?: " (from source)"),
+                                "Device" to settings.deviceName.ifEmpty { "unnamed" },
+                                "Android" to "${android.os.Build.MODEL}, " +
+                                    "API ${android.os.Build.VERSION.SDK_INT}",
+                                "Session" to when (sessionRole) {
+                                    SessionRole.LEADER -> "leading \"${sessionLabel ?: "?"}\" " +
+                                        "with ${leaderState?.followers?.size ?: 0} following"
+                                    SessionRole.FOLLOWER -> "following \"${sessionLabel ?: "?"}\", " +
+                                        "${followerState?.link}, ${followerState?.mode}"
+                                    SessionRole.NONE -> "not in a session"
+                                },
+                                "Library" to "${index.songs.size} charts from " +
+                                    "${index.sources.size} sources",
+                            ),
+                            onBack = { navigator.back() },
+                        )
+                    }
 
                     Screen.FootSwitchSetup -> FootSwitchSetupScreen(
                         settings = settings,
