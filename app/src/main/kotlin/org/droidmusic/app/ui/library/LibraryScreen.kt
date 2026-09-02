@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -20,12 +19,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -34,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -80,18 +82,28 @@ fun LibraryScreen(
     controller: LibraryController,
     onOpenSong: (SongRef) -> Unit,
     onAddSongToSetlist: (SongRef) -> Unit,
-    onOpenSetlists: () -> Unit,
-    onOpenSession: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onAddSongsToSetlist: (List<SongRef>) -> Unit,
+    onEditSong: (SongRef) -> Unit,
+    onNewFromUrl: () -> Unit,
+    onNewFromText: () -> Unit,
+    onNewBlank: () -> Unit,
     onScan: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val index by controller.index.collectAsState()
     var query by remember { mutableStateOf("") }
     var sourceFilter by remember { mutableStateOf<String?>(null) }
     var showSources by remember { mutableStateOf(false) }
+    var showNewChart by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<SongRef?>(null) }
     var deleting by remember { mutableStateOf<SongRef?>(null) }
     var transposing by remember { mutableStateOf<SongRef?>(null) }
+
+    // What a bulk action is about. Resolved from the selection at the moment
+    // the action is chosen, so a dialog cannot be left pointing at a chart that
+    // has since been dropped from the selection underneath it.
+    var transposingMany by remember { mutableStateOf<List<SongRef>>(emptyList()) }
+    var removingMany by remember { mutableStateOf<List<SongRef>>(emptyList()) }
 
     val addFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -160,6 +172,30 @@ fun LibraryScreen(
         )
     }
 
+    if (transposingMany.isNotEmpty()) {
+        val subjects = transposingMany
+        BulkTransposeDialog(
+            songs = subjects,
+            onConfirm = { semitones, capo ->
+                controller.setTransposeAll(subjects, semitones, capo)
+                transposingMany = emptyList()
+            },
+            onDismiss = { transposingMany = emptyList() },
+        )
+    }
+
+    if (removingMany.isNotEmpty()) {
+        val subjects = removingMany
+        ConfirmRemoveManyDialog(
+            count = subjects.size,
+            onConfirm = {
+                controller.removeFromLibraryAll(subjects)
+                removingMany = emptyList()
+            },
+            onDismiss = { removingMany = emptyList() },
+        )
+    }
+
     if (showSources) {
         SourcesDialog(
             index = index,
@@ -171,16 +207,47 @@ fun LibraryScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Header(
-            title = "Library",
-            subtitle = "${index.visible.size} charts in ${index.sources.size} places",
-            actions = {
-                HeaderAction(Icons.Filled.PhotoCamera, "Scan music", onScan)
-                HeaderAction(Icons.Filled.Refresh, "Rescan") { controller.rescanAll() }
-                HeaderAction(Icons.Filled.Folder, "Folders and files") { showSources = true }
-                HeaderAction(Icons.Filled.Settings, "Settings", onOpenSettings)
-            },
-        )
+        if (controller.selecting) {
+            Header(
+                title = if (controller.selection.isEmpty()) {
+                    "Select charts"
+                } else {
+                    "${controller.selection.size} selected"
+                },
+                subtitle = "Tap to pick, tap again to drop",
+                onBack = { controller.stopSelecting() },
+                actions = {
+                    TextButton(
+                        onClick = { controller.selectAll(songs.map { it.id }) },
+                    ) { Text("All") }
+                    TextButton(onClick = { controller.stopSelecting() }) { Text("Done") }
+                },
+            )
+        } else {
+            Header(
+                title = "Library",
+                subtitle = "${index.visible.size} charts in ${index.sources.size} places",
+                onBack = onBack,
+                actions = {
+                    Box {
+                        HeaderAction(Icons.Filled.Add, "New chart") { showNewChart = true }
+                        NewChartMenu(
+                            expanded = showNewChart,
+                            onDismiss = { showNewChart = false },
+                            onFromUrl = { showNewChart = false; onNewFromUrl() },
+                            onFromText = { showNewChart = false; onNewFromText() },
+                            onBlank = { showNewChart = false; onNewBlank() },
+                            onScan = { showNewChart = false; onScan() },
+                        )
+                    }
+                    HeaderAction(Icons.Filled.Checklist, "Bulk edit") {
+                        controller.startSelecting()
+                    }
+                    HeaderAction(Icons.Filled.Refresh, "Rescan") { controller.rescanAll() }
+                    HeaderAction(Icons.Filled.Folder, "Folders and files") { showSources = true }
+                },
+            )
+        }
 
         if (controller.scanning) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -206,12 +273,18 @@ fun LibraryScreen(
             )
         }
 
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TextButton(onClick = onOpenSetlists) { Text("Set lists") }
-            TextButton(onClick = onOpenSession) { Text("Session") }
+        // The bulk action bar, deliberately the same actions the per-chart menu
+        // offers. A player who learns that holding a chart offers "transpose"
+        // should not find that selecting forty of them offers something else.
+        // Edit is the one exception, and it is context-menu only because
+        // editing forty charts at once is not a thing anybody means.
+        if (controller.selecting) {
+            BulkActionBar(
+                enabled = controller.selection.isNotEmpty(),
+                onTranspose = { transposingMany = controller.selectedSongs() },
+                onAddToSetlist = { onAddSongsToSetlist(controller.selectedSongs()) },
+                onRemove = { removingMany = controller.selectedSongs() },
+            )
         }
 
         OutlinedTextField(
@@ -281,16 +354,35 @@ fun LibraryScreen(
                 item {
                     // Where the gesture gets discovered. A press and hold that
                     // nobody knows about is not a feature.
-                    SectionLabel("${songs.size} charts - hold one for set lists, renaming and more")
+                    SectionLabel(
+                        if (controller.selecting) {
+                            "${controller.selection.size} of ${songs.size} selected"
+                        } else {
+                            "${songs.size} charts - hold one for set lists, editing and more"
+                        },
+                    )
                 }
                 items(songs, key = { it.id }) { song ->
                     SongRow(
                         song = song,
                         sourceLabel = controller.sourceLabel(index, song.sourceId),
                         canDeleteFile = { controller.canDeleteFile(song) },
-                        onClick = { onOpenSong(song) },
+                        selecting = controller.selecting,
+                        selected = song.id in controller.selection,
+                        // While a selection is running both gestures mean the
+                        // same thing. A tap that opened a chart in the middle of
+                        // picking forty would lose the selection.
+                        onClick = {
+                            if (controller.selecting) {
+                                controller.toggleSelected(song.id)
+                            } else {
+                                onOpenSong(song)
+                            }
+                        },
+                        onSelect = { controller.toggleSelected(song.id) },
                         onAddToSetlist = { onAddSongToSetlist(song) },
                         onTranspose = { transposing = song },
+                        onEdit = { onEditSong(song) },
                         onRename = { renaming = song },
                         onRemove = { controller.removeFromLibrary(song) },
                         onDeleteFile = { deleting = song },
@@ -705,9 +797,13 @@ private fun SongRow(
     song: SongRef,
     sourceLabel: String,
     canDeleteFile: () -> Boolean,
+    selecting: Boolean,
+    selected: Boolean,
     onClick: () -> Unit,
+    onSelect: () -> Unit,
     onAddToSetlist: () -> Unit,
     onTranspose: () -> Unit,
+    onEdit: () -> Unit,
     onRename: () -> Unit,
     onRemove: () -> Unit,
     onDeleteFile: () -> Unit,
@@ -731,6 +827,9 @@ private fun SongRow(
             // A PDF is a picture of a page. There is nothing in one to rewrite,
             // so it is not offered a key.
             canTranspose = song.isTransposable,
+            // Only a chart made of characters has anything to edit. A PDF gets
+            // Rename, which is the whole of what can be changed about it.
+            canEdit = song.isTransposable,
             onDismiss = { menuOpen = false },
             onAddToSetlist = {
                 menuOpen = false
@@ -739,6 +838,10 @@ private fun SongRow(
             onTranspose = {
                 menuOpen = false
                 onTranspose()
+            },
+            onEdit = {
+                menuOpen = false
+                onEdit()
             },
             onRename = {
                 menuOpen = false
@@ -753,7 +856,16 @@ private fun SongRow(
                 onDeleteFile()
             },
         )
-        SongRowBody(song, sourceLabel, onClick) { menuOpen = true }
+        SongRowBody(
+            song = song,
+            sourceLabel = sourceLabel,
+            selecting = selecting,
+            selected = selected,
+            onClick = onClick,
+            // A press and hold picks rather than opening the menu once a
+            // selection is running: the menu's actions are all on the bar.
+            onLongClick = { if (selecting) onSelect() else menuOpen = true },
+        )
     }
 }
 
@@ -762,9 +874,11 @@ private fun SongMenu(
     expanded: Boolean,
     canDeleteFile: Boolean,
     canTranspose: Boolean,
+    canEdit: Boolean,
     onDismiss: () -> Unit,
     onAddToSetlist: () -> Unit,
     onTranspose: () -> Unit,
+    onEdit: () -> Unit,
     onRename: () -> Unit,
     onRemove: () -> Unit,
     onDeleteFile: () -> Unit,
@@ -773,6 +887,9 @@ private fun SongMenu(
         DropdownMenuItem(text = { Text("Add to a set list") }, onClick = onAddToSetlist)
         if (canTranspose) {
             DropdownMenuItem(text = { Text("Transpose\u2026") }, onClick = onTranspose)
+        }
+        if (canEdit) {
+            DropdownMenuItem(text = { Text("Edit the chart\u2026") }, onClick = onEdit)
         }
         DropdownMenuItem(text = { Text("Rename\u2026") }, onClick = onRename)
         DropdownMenuItem(text = { Text("Remove from library") }, onClick = onRemove)
@@ -793,20 +910,43 @@ private fun SongMenu(
 private fun SongRowBody(
     song: SongRef,
     sourceLabel: String,
+    selecting: Boolean,
+    selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    Color.Transparent
+                },
+            )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
-                onLongClickLabel = "What to do with this chart",
+                onLongClickLabel = if (selecting) {
+                    "Select this chart"
+                } else {
+                    "What to do with this chart"
+                },
             )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selecting) {
+            Checkbox(
+                checked = selected,
+                // The whole row is the target and already announces itself; a
+                // checkbox that also took clicks would give a screen reader two
+                // controls doing one job.
+                onCheckedChange = null,
+                modifier = Modifier.padding(end = 12.dp),
+            )
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 song.bestTitle,
@@ -854,4 +994,155 @@ private fun SongRowBody(
             }
         }
     }
+}
+
+/**
+ * The four ways a chart gets into the library that do not involve a folder.
+ *
+ * Scanning is here rather than beside the folder button because photographing a
+ * page produces a new chart, which is what this menu is for. Where the app looks
+ * for charts that already exist is a different question with its own button.
+ */
+@Composable
+private fun NewChartMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onFromUrl: () -> Unit,
+    onFromText: () -> Unit,
+    onBlank: () -> Unit,
+    onScan: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(text = { Text("Import from URL\u2026") }, onClick = onFromUrl)
+        DropdownMenuItem(text = { Text("Import from text\u2026") }, onClick = onFromText)
+        DropdownMenuItem(text = { Text("Blank song") }, onClick = onBlank)
+        HorizontalDivider()
+        DropdownMenuItem(text = { Text("Photograph a page") }, onClick = onScan)
+    }
+}
+
+/**
+ * What a selection can have done to it.
+ *
+ * Buttons rather than a menu, because with a selection already made the next tap
+ * should be the action itself. Deleting files is deliberately absent: it is
+ * irreversible, it applies to only some charts, and offering it as one tap over
+ * forty of them is how somebody loses a folder of scans.
+ */
+@Composable
+private fun BulkActionBar(
+    enabled: Boolean,
+    onTranspose: () -> Unit,
+    onAddToSetlist: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(enabled = enabled, onClick = onAddToSetlist) { Text("Add to set list") }
+        TextButton(enabled = enabled, onClick = onTranspose) { Text("Transpose") }
+        Box(Modifier.weight(1f))
+        TextButton(enabled = enabled, onClick = onRemove) { Text("Remove") }
+    }
+}
+
+/**
+ * Setting the key a selection of charts opens in.
+ *
+ * An absolute value rather than a nudge. "Everything in this set goes up two"
+ * is not a thing anybody means; "these are the ones we play in D" is - and a
+ * relative shift applied to forty charts already in different keys produces
+ * forty different wrong answers.
+ */
+@Composable
+private fun BulkTransposeDialog(
+    songs: List<SongRef>,
+    onDismiss: () -> Unit,
+    onConfirm: (semitones: Int, capo: Int) -> Unit,
+) {
+    var semitones by remember { mutableStateOf(0) }
+    var capo by remember { mutableStateOf(0) }
+    val transposable = songs.count { it.isTransposable }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Transpose ${songs.size} charts") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Transpose: ${signed(semitones)} semitones",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = semitones.toFloat(),
+                    onValueChange = { semitones = it.toInt() },
+                    valueRange = -11f..11f,
+                    steps = 21,
+                )
+                Text(
+                    "Capo: ${if (capo == 0) "none" else "fret $capo"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = capo.toFloat(),
+                    onValueChange = { capo = it.toInt() },
+                    valueRange = 0f..11f,
+                    steps = 10,
+                )
+                // Said, not prevented. A PDF among forty charts is not a reason
+                // to refuse the whole action.
+                if (transposable < songs.size) {
+                    Text(
+                        "${songs.size - transposable} of these are scans or PDFs. There is " +
+                            "nothing in a picture of a page to rewrite, so they are left " +
+                            "as they are.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = transposable > 0,
+                onClick = { onConfirm(semitones, capo) },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * The bulk remove confirmation.
+ *
+ * Leads with the fact that nothing is deleted, because "remove 40 charts" next
+ * to somebody's whole library is frightening without that sentence - and it is
+ * undoable, which is the other thing worth saying before they decide.
+ */
+@Composable
+private fun ConfirmRemoveManyDialog(
+    count: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Remove $count charts from the library?") },
+        text = {
+            Text(
+                "DroidMusic stops listing them. No files are deleted - they stay wherever " +
+                    "they came from, and Settings has a way to put them all back.\n\n" +
+                    "Any set list entry pointing at one of them will show as missing.",
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Remove") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

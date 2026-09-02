@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
+import org.droidmusic.app.data.ThemeChoice
 
 /**
  * Dark by default, and not as a style choice.
@@ -70,11 +71,16 @@ val ChartTextStyle = TextStyle(
 
 @Composable
 fun DroidMusicTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    theme: ThemeChoice = ThemeChoice.DARK,
     content: @Composable () -> Unit,
 ) {
+    val dark = when (theme) {
+        ThemeChoice.DARK -> true
+        ThemeChoice.LIGHT -> false
+        ThemeChoice.SYSTEM -> isSystemInDarkTheme()
+    }
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = if (dark) DarkColors else LightColors,
         typography = Typography(),
         content = content,
     )

@@ -1025,7 +1025,98 @@ and a random UUID does that perfectly.
 
 ---
 
-## 15. Things deliberately not built
+## 15. The menu, and why the library stopped being the front door
+
+The app used to open on the library, with set lists and sessions behind text
+buttons in a row under the header. That makes the library *the app* and the other
+three a detour, which is the wrong shape the moment somebody opens DroidMusic to
+join a session rather than to find a chart — and joining a session is what
+happens at every rehearsal.
+
+So the root is a menu of the four things the app does, each row carrying a live
+summary. "Set lists" tells a reader nothing they did not know; "Set lists — 4
+saved, most recently Friday at the Bassment" is the answer to the question they
+opened the app to ask, without a tap. Not a bottom bar and not a drawer: those
+are for moving between places you are already in, and the first question here is
+which place to be in at all.
+
+### One action set, two ways to reach it
+
+A press and hold offers what can be done to one item; bulk edit offers the same
+list for a selection. Keeping them identical is the point — a player who learns
+that holding a chart offers "transpose" should not discover that selecting forty
+of them offers something else. Two asymmetries, both deliberate:
+
+- **Edit is press-and-hold only.** Editing forty charts at once is not a thing
+  anybody means.
+- **Delete file is press-and-hold only.** It is irreversible, it applies to only
+  the charts this app wrote, and offering it as one tap over a selection of forty
+  is how somebody loses a folder of scans. Bulk offers *remove*, which is
+  reversible and touches no files.
+
+### Settings became seven rows
+
+The old screen put the tap zones, the page mode, the text size and the screen
+lock in one column, so changing where "back" is meant scrolling past four
+decisions about something else. These are questions asked at completely different
+times — the tap zones once, when the app is new; the theme when the room changes;
+diagnostics when something is wrong — so each got its own place, and the two that
+are a single control each (the device name, keeping the screen awake) stayed
+inline. A row that costs a tap to reach one toggle is a row that should not exist.
+
+Dark stays the default rather than becoming the only answer. The reasoning in
+section 9 has not changed — a bright screen on a stand is a light pointed at the
+audience — but a player reading charts on a bus is not on a stage at the time,
+and the setting costs one enum.
+
+---
+
+## 16. Writing a chart in the app
+
+The editor is a text box. No chord palette, no formatting toolbar, no preview
+pane, and that is not minimalism for its own sake: ChordPro *is* the editing
+interface. `[Am]` above the word it belongs over is both what you type and what
+it means, and a toolbar that inserted brackets would be slower than the keyboard
+for anybody who has typed two charts. A preview pane would halve the screen to
+show a rendering of text that already looks like what it renders to.
+
+Monospaced, because the layout engine that puts a chord above the exact character
+it belongs to only works if every character is the same width — so typing in a
+proportional font would mean everything lining up while writing and nothing
+lining up when it opens.
+
+**No autosave.** A chart half-typed on a bus is not something to write over a
+good copy, so leaving with unsaved changes asks first and then throws the edit
+away.
+
+**Editing keeps the song's id.** A save that wrote a new file with a new id would
+silently empty every set list the chart appears in, since a set list entry refers
+to a song by id. So the file behind the song is rewritten in place — and only
+when this app owns it. A chart in one of the user's own folders is refused with a
+sentence, because quietly failing to save somebody's edit is the worst of the
+available outcomes.
+
+The filename comes from `ChartShare.safeFileName` rather than a sanitiser of its
+own. That rule — a name that is safe to create, whatever it arrived as — has one
+correct answer and already has tests around it, including the one that matters:
+that no input can produce a path.
+
+### Importing by address
+
+An Ultimate Guitar link goes down the path section 5 already describes: fetched,
+converted, filed, opened. Anything else is fetched and handed to the **editor**
+rather than the library.
+
+That difference is the whole design. The Ultimate Guitar path knows what it is
+looking at and can be trusted to produce a chart. An arbitrary URL cannot: what
+comes back is frequently a login wall, a directory listing, or the right song in
+a format nothing here reads. Filing that would produce a library entry that looks
+like a chart and opens as garbage, discovered on a stand. Showing it first costs
+one screen and makes the failure obvious at the moment it happens.
+
+---
+
+## 17. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
@@ -1036,6 +1127,12 @@ and a random UUID does that perfectly.
   useless for a fingerstyle arrangement.
 - **Automatic page turning by tempo.** Nobody plays to a click that reliably,
   and a chart that turns itself at the wrong moment is worse than no feature.
+- **Browsing the leader's whole library over a session.** An ad hoc session
+  shares as it goes: a chart reaches the band when the leader opens it. Letting
+  a follower enumerate and pull the leader's entire library would mean anybody
+  on an unauthenticated venue network could do the same, and the bounds in
+  section 8 exist precisely because that socket has no identity behind it. A
+  band that wants everything in advance runs the session from a set list.
 - **A cloud account or a sync server.** The band are in the same room. Set lists
   travel as files or over the local network, and nothing needs an account.
 - **Drag-and-drop set list reordering *instead of* buttons.** The drag is built

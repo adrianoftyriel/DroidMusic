@@ -109,14 +109,28 @@ jobs:
             exit 1
           fi
 
+          # A version being worked on carries a -dev suffix in gradle.properties,
+          # so that a build installed off a branch says what it is. The suffix is
+          # the branch's business and not the tag's: stripped here so that dev
+          # publishes v0.1.1-dev.<run> rather than v0.1.1-dev-dev.<run>, which
+          # would still sort correctly and still read as a mistake.
+          base="${version%-dev}"
+
           if [ "${{ github.ref_name }}" = "main" ]; then
+            # A release built from a version still marked -dev would publish
+            # v0.1.1 from a tree that says 0.1.1-dev, so the APK and the tag
+            # would disagree about what they are. Refuse rather than pick one.
+            if [ "$base" != "$version" ]; then
+              echo "::error::droidmusic.versionName is $version. Drop the -dev suffix in gradle.properties before merging to main."
+              exit 1
+            fi
             tag="v${version}"
             title="DroidMusic ${tag}"
             prerelease=false
           else
             # Pre-release tags carry the run number, so every push to dev
             # produces a distinct, ordered tag without anyone bumping anything.
-            tag="v${version}-dev.${{ github.run_number }}"
+            tag="v${base}-dev.${{ github.run_number }}"
             title="DroidMusic ${tag} (pre-release)"
             prerelease=true
           fi

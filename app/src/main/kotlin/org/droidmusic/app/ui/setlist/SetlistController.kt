@@ -84,8 +84,18 @@ class SetlistController(
         scope.launch { repository.delete(id) }
     }
 
-    fun add(setlist: Setlist, song: SongRef) {
-        save(setlist.copy(entries = setlist.entries + entryFor(song)))
+    fun add(setlist: Setlist, song: SongRef) = addAll(setlist, listOf(song))
+
+    /**
+     * Adds several songs in one write.
+     *
+     * Not a loop over [add]: each of those is a whole-file save racing the next,
+     * and forty fired off together is a set list that comes back holding an
+     * arbitrary subset of what was asked for.
+     */
+    fun addAll(setlist: Setlist, songs: List<SongRef>) {
+        if (songs.isEmpty()) return
+        save(setlist.copy(entries = setlist.entries + songs.map { entryFor(it) }))
     }
 
     /**
@@ -235,6 +245,60 @@ class SetlistController(
                         if (taken.missing.size > 5) ", and more." else "."
             }
         }
+    }
+
+    // ---- Bulk edit ---------------------------------------------------------
+
+    var selection by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    var selecting by mutableStateOf(false)
+        private set
+
+    fun startSelecting() {
+        selecting = true
+        selection = emptySet()
+    }
+
+    fun stopSelecting() {
+        selecting = false
+        selection = emptySet()
+    }
+
+    fun toggleSelected(id: String) {
+        selection = if (id in selection) selection - id else selection + id
+    }
+
+    fun selectAll(ids: List<String>) {
+        selection = ids.toSet()
+    }
+
+    fun selectedSetlists(): List<Setlist> = book.value.setlists.filter { it.id in selection }
+
+    /** Deletes several set lists, then drops out of selection mode. */
+    fun deleteAll(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        scope.launch {
+            for (id in ids) repository.delete(id)
+            stopSelecting()
+        }
+    }
+
+    /**
+     * Renames a set list and says where and when it is being played.
+     *
+     * A blank name keeps the old one rather than clearing it: an unnamed running
+     * order cannot be told apart from the others in the list, and the dialog
+     * already refuses to save one, so this is the belt to that pair of braces.
+     */
+    fun setDetails(setlist: Setlist, name: String, venue: String, date: String) {
+        save(
+            setlist.copy(
+                name = name.ifBlank { setlist.name },
+                venue = venue.ifBlank { null },
+                date = date.ifBlank { null },
+            ),
+        )
     }
 
     fun clearMessage() {

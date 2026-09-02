@@ -1,6 +1,8 @@
 package org.droidmusic.app.ui.session
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,13 +11,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +41,7 @@ import org.droidmusic.app.ui.common.EmptyState
 import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.Pill
 import org.droidmusic.app.ui.common.SectionLabel
+import org.droidmusic.library.Setlist
 import org.droidmusic.session.FollowMode
 import org.droidmusic.session.ChartShare
 import org.droidmusic.session.ChartSharing
@@ -51,7 +57,10 @@ import org.droidmusic.session.LinkState
 @Composable
 fun SessionScreen(
     coordinator: SessionCoordinator,
+    setlists: List<Setlist>,
     deviceName: String,
+    onDeviceNameChange: (String) -> Unit,
+    onStartWithSetlists: (name: String, setlists: List<Setlist>) -> Unit,
     onBack: () -> Unit,
 ) {
     val role by coordinator.role.collectAsState()
@@ -63,6 +72,7 @@ fun SessionScreen(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var sessionName by remember { mutableStateOf("") }
+    var choosingSetlists by remember { mutableStateOf(false) }
 
     // Discovery runs only while this screen is open, and only while this device
     // is not already in a session. Browsing mDNS costs battery, and there is no
@@ -81,9 +91,20 @@ fun SessionScreen(
     }
     val discovered by discovery.collectAsState(initial = emptyList())
 
+    if (choosingSetlists) {
+        ChooseSetlistsDialog(
+            setlists = setlists,
+            onDismiss = { choosingSetlists = false },
+            onStart = { chosen ->
+                choosingSetlists = false
+                onStartWithSetlists(sessionName.ifBlank { deviceName }, chosen)
+            },
+        )
+    }
+
     Column(Modifier.fillMaxSize()) {
         Header(
-            title = "Band session",
+            title = "Sessions",
             subtitle = SessionCoordinator.statusLine(
                 role = role,
                 leader = leaderState,
@@ -103,8 +124,23 @@ fun SessionScreen(
         }
 
         when (role) {
-            SessionRole.NONE -> Column(Modifier.fillMaxSize()) {
-                SectionLabel("Lead the band")
+            SessionRole.NONE -> Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            ) {
+                // The name goes first because it is the thing everybody else
+                // sees, and the one setting somebody wants to fix in the ten
+                // seconds before they tap Start rather than by going to
+                // Settings and finding their way back.
+                SectionLabel("Device name")
+                OutlinedTextField(
+                    value = deviceName,
+                    onValueChange = onDeviceNameChange,
+                    label = { Text("What the band sees") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                )
+
+                SectionLabel("New session")
                 Text(
                     "Everyone who joins follows your page turns. If someone loses the " +
                         "network they carry on with their own, and pick you back up when it " +
@@ -113,27 +149,42 @@ fun SessionScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
+                OutlinedTextField(
+                    value = sessionName,
+                    onValueChange = { sessionName = it },
+                    label = { Text("Session name") },
+                    placeholder = { Text(deviceName) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
                 Row(
-                    Modifier.fillMaxWidth().padding(16.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedTextField(
-                        value = sessionName,
-                        onValueChange = { sessionName = it },
-                        label = { Text("Session name") },
-                        placeholder = { Text(deviceName) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
                     Button(
                         onClick = {
                             scope.launch {
                                 coordinator.startLeading(sessionName.ifBlank { deviceName })
                             }
                         },
-                    ) { Text("Start") }
+                    ) { Text("Ad hoc") }
+                    OutlinedButton(
+                        enabled = setlists.isNotEmpty(),
+                        onClick = { choosingSetlists = true },
+                    ) { Text("Choose set lists") }
                 }
+                Text(
+                    "Ad hoc is the gig called from the stage: no running order, and a chart " +
+                        "reaches the band when you open it. Choosing set lists sends the " +
+                        "running order to everyone who joins and checks, before the first " +
+                        "song, that they can all open every chart in it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
+                )
 
                 HorizontalDivider()
                 SectionLabel("Join a session")
@@ -385,4 +436,71 @@ private fun ChartSharingPanel(
             )
         }
     }
+}
+
+/**
+ * Which running orders tonight is being played from.
+ *
+ * More than one on purpose: two sets with a break in the middle is the ordinary
+ * shape of a gig, and making that two sessions would mean everybody rejoining
+ * during the interval.
+ */
+@Composable
+private fun ChooseSetlistsDialog(
+    setlists: List<Setlist>,
+    onDismiss: () -> Unit,
+    onStart: (List<Setlist>) -> Unit,
+) {
+    var chosen by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("What are you playing?") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Everyone who joins gets these without being sent a file, and Backstage " +
+                        "checks they can open every chart before you start.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                for (setlist in setlists) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                chosen = if (setlist.id in chosen) {
+                                    chosen - setlist.id
+                                } else {
+                                    chosen + setlist.id
+                                }
+                            }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = setlist.id in chosen, onCheckedChange = null)
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(setlist.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                listOfNotNull(
+                                    "${setlist.size} songs",
+                                    setlist.venue,
+                                    setlist.date,
+                                ).joinToString(" - "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = chosen.isNotEmpty(),
+                onClick = { onStart(setlists.filter { it.id in chosen }) },
+            ) { Text("Start") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

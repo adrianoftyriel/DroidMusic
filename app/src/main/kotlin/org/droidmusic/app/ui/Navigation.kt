@@ -15,6 +15,16 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
  * of bugs where a title with a slash in it breaks navigation.
  */
 sealed interface Screen {
+    /**
+     * The four things the app does, and nothing else.
+     *
+     * A root that is one of the four - the library, as it used to be - makes
+     * that one the app and the other three a detour, which is the wrong shape
+     * the moment somebody opens DroidMusic to join a session rather than to
+     * find a chart. Which is most rehearsals.
+     */
+    data object MainMenu : Screen
+
     data object Library : Screen
     data object Setlists : Screen
     data class SetlistDetail(val setlistId: String) : Screen
@@ -29,11 +39,29 @@ sealed interface Screen {
     data object Backstage : Screen
     data object Settings : Screen
     data object FootSwitchSetup : Screen
+
+    /** How the page is turned and how it is laid out: everything under the hand. */
+    data object Controls : Screen
+
     data object Updates : Screen
 
     /** The log of what the app just did, for sending to somebody who can read it. */
     data object Diagnostics : Screen
     data object Capture : Screen
+
+    /**
+     * The chart editor, on an existing song or on a new one.
+     *
+     * A null [songId] is a chart that does not exist yet; [seedText] is what it
+     * starts life containing, which is empty for a blank song and the pasted or
+     * downloaded text for an import. Carrying the seed here rather than writing
+     * a file first means an import that is abandoned leaves nothing behind.
+     */
+    data class SongEditor(
+        val songId: String? = null,
+        val seedText: String = "",
+        val seedTitle: String = "",
+    ) : Screen
 
     /**
      * The viewer, opened either on a single song or on a position in a set list.
@@ -76,4 +104,4 @@ class Navigator(initial: Screen) {
 }
 
 @Composable
-fun rememberNavigator(initial: Screen = Screen.Library): Navigator = remember { Navigator(initial) }
+fun rememberNavigator(initial: Screen = Screen.MainMenu): Navigator = remember { Navigator(initial) }

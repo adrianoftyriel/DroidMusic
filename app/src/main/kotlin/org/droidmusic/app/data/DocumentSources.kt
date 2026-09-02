@@ -227,6 +227,21 @@ object DocumentSources {
             }
         }
 
+    /**
+     * The file behind a chart, when this app is the one that wrote it.
+     *
+     * The public face of [managedFile], for the editor: a chart in one of the
+     * user's own folders comes back null and is not written to, because the app
+     * holds read access to those and nothing more. Same guard as deleting uses,
+     * so a `file://` URI pointing outside the app's storage cannot talk either
+     * of them into touching it.
+     */
+    fun managedFileOf(context: Context, song: SongRef): java.io.File? {
+        val uri = runCatching { Uri.parse(song.uri) }.getOrNull() ?: return null
+        if (uri.scheme != "file") return null
+        return managedFile(context, uri)
+    }
+
     private fun hasWritePermission(context: Context, uri: Uri): Boolean = runCatching {
         context.checkUriPermission(
             uri,

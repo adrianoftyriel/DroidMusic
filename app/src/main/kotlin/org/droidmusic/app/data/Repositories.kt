@@ -75,6 +75,19 @@ class LibraryRepository(directory: File, scope: CoroutineScope) {
      * the chart back, and there is nothing to remember about a file that no longer
      * exists.
      */
+    /**
+     * Applies one change to many songs in a single write.
+     *
+     * A bulk edit that transposed forty charts one at a time would be forty
+     * whole-file writes of the index racing each other, and a phone locked
+     * halfway through leaves an arbitrary subset changed with nothing on screen
+     * to say which.
+     */
+    suspend fun updateSongs(ids: Set<String>, transform: (SongRef) -> SongRef) =
+        store.update { current ->
+            current.copy(songs = current.songs.map { if (it.id in ids) transform(it) else it })
+        }
+
     suspend fun dropSong(id: String) = store.update { current ->
         current.copy(songs = current.songs.filterNot { it.id == id })
     }

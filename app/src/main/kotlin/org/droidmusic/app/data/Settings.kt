@@ -5,6 +5,18 @@ import org.droidmusic.app.input.FootSwitchMap
 import org.droidmusic.app.ui.viewer.ViewerPreferences
 import org.droidmusic.update.UpdateChannel
 
+/**
+ * Which colours the app draws itself in.
+ *
+ * [SYSTEM] is not the default. A phone set to light because that is what its
+ * owner wants at a desk is still the phone that will be on a stand in a dark
+ * room pointed at an audience, and being readable there is this app's job
+ * rather than being consistent with the launcher. Somebody who wants the system
+ * setting followed can say so, which is what this is for.
+ */
+@Serializable
+enum class ThemeChoice { SYSTEM, LIGHT, DARK }
+
 @Serializable
 data class AppSettings(
     val viewer: ViewerPreferences = ViewerPreferences(),
@@ -17,6 +29,7 @@ data class AppSettings(
     val autoJoinLastSession: Boolean = false,
     /** Index the contents of text charts on import, for search and key detection. */
     val indexChartContents: Boolean = true,
+    val theme: ThemeChoice = ThemeChoice.DARK,
     /**
      * Which builds the in-app updater will offer.
      *

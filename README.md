@@ -13,9 +13,9 @@ result the way an arranger would write it.
 
 ## Status
 
-**v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 354 tests that run on a plain JVM; the
-app layer adds its own.
+**v0.1.1-dev.** Everything described below is implemented. The music theory, set
+list, band-sync and update layers are covered by 354 tests that run on a plain
+JVM; the app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
 What has *not* happened is anyone running it on a phone — see
@@ -25,6 +25,24 @@ worth reading before relying on this at a gig.
 ---
 
 ## What it does
+
+### Four things, and a menu that says so
+
+The app opens on a **main menu** with one row each for **Library**, **Set
+Lists**, **Sessions** and **Settings**, and each row says what is behind it: how
+many charts, which running order is next, whether a session is live. Making one
+of the four the front door — as an earlier version did with the library — makes
+the other three a detour, which is the wrong shape the moment somebody opens
+DroidMusic to join a session rather than to find a chart. Which is most
+rehearsals.
+
+**One action set, two ways to reach it.** In the library and the set lists,
+press and hold anything for what can be done to it, or tap **Bulk edit** to pick
+several and do the same thing to all of them. The two menus are deliberately the
+same: a player who learns that holding a chart offers "transpose" should not then
+find that selecting forty of them offers something different. The one exception
+is editing, which is press-and-hold only, because editing forty charts at once is
+not a thing anybody means.
 
 ### Files, from anywhere the phone can see
 
@@ -90,9 +108,15 @@ Hold a chart in the list and it offers what can be done with it.
 |---|---|
 | **Add to a set list** | Files it into tonight's running order without leaving the library. |
 | **Transpose** | Sets the key the song is played in, for good. |
+| **Edit the chart** | Opens it in the editor. Text charts only — a PDF has nothing inside it to edit. |
 | **Rename** | Changes what DroidMusic calls it. |
 | **Remove from library** | Stops listing it. The file is not touched. |
 | **Delete file** | Deletes it, and only appears when that is actually possible. |
+
+**Bulk edit** offers the first three of those over a selection: file forty charts
+into a set list at once, or set the key on all of them. Deleting files is
+deliberately absent from it — it is irreversible, it applies to only some charts,
+and offering it as one tap over forty is how somebody loses a folder of scans.
 
 **Transposing from here is remembered.** The viewer has always been able to
 transpose a chart, but only until you closed it. A key set from this menu sticks:
@@ -196,6 +220,36 @@ It imports **chord charts**, not Ultimate Guitar's official or Pro tabs — thos
 are interactive players with no text behind them, and there is nothing in one to
 import. When that is what was shared, the app says so rather than saving an empty
 file.
+
+### Writing a chart, and importing one by address
+
+**New chart** in the library offers three ways in beside the scanner:
+
+- **Import from URL** — an Ultimate Guitar address is converted and filed exactly
+  as a shared link is. Any other address is fetched and **opened in the editor
+  rather than saved**, because what comes back from an arbitrary URL is often not
+  what was wanted — a login wall, a listing, the right song in the wrong format —
+  and seeing it before it is filed is the difference between noticing that now
+  and finding out on a stand.
+- **Import from text** — paste a chart out of a message or an email.
+- **Blank song** — start from nothing.
+
+The editor is a plain monospaced text box and nothing else: no chord palette, no
+formatting toolbar, no preview pane. ChordPro is already the editing interface —
+`[Am]` above the word it belongs over is both what you type and what it means —
+and a toolbar that inserted brackets would be slower than the keyboard for
+anybody who has typed two charts. It is monospaced because the same layout engine
+that aligns chords over syllables reads what comes out of it, so a proportional
+font would mean everything lining up while writing and nothing lining up when it
+opens.
+
+There is **no autosave**, and leaving with unsaved changes asks first: a chart
+half-typed on a bus is not something to write over a good copy. Saving an
+existing chart rewrites it in place and **keeps its id**, because every set list
+that contains it refers to it by id and a save that produced a new one would
+silently empty the running orders it appears in. A chart in one of your own
+folders is not written to at all — the app holds read access to those, and it
+says so rather than quietly failing to save your edit.
 
 ### Turning pages
 
@@ -341,7 +395,7 @@ those devices had on the local network — and no part of any chart.
 
 ### Updating itself
 
-There is no Play Store listing, so **Settings - Check for updates** fetches the
+There is no Play Store listing, so **Settings - Updates** fetches the
 newest build straight from this repository's releases and hands it to Android's
 installer. You choose whether to be offered full releases only or the
 pre-releases that every push to `dev` produces.
@@ -382,9 +436,19 @@ for good means configuring a signing key; see
 
 ### Band-leader mode
 
-One device taps **Start**; the rest tap its name. Sessions find each other over
+One device starts a session; the rest tap its name. Sessions find each other over
 mDNS on the local network, so nobody types an IP address ninety seconds before
 the first song. The leader turns a page and everyone's turns.
+
+**Starting one asks what kind of night it is.** *Ad hoc* is the gig called from
+the stage: no running order, and a chart reaches the band when the leader opens
+it. *Choose set lists* sends the running order to everyone who joins — including
+whoever arrives ten minutes late — and goes straight to Backstage, which checks
+before the first song that every device can open every chart in it.
+
+The device name sits at the top of that screen rather than only in Settings,
+because it is the one thing everybody else sees and the one setting somebody
+wants to fix in the ten seconds before they tap Start.
 
 Nothing leaves the room: mDNS to discover, a TCP socket to follow, no server
 anywhere.
@@ -483,6 +547,20 @@ absent rather than present and broken. Tablature can be shifted by fret, but it
 is off by default and refuses rather than emitting a fret of −2, because adding
 three to every fret produces the same notes in a completely different and often
 unplayable position.
+
+### Settings, in seven rows
+
+Device name, theme, foot switch options, controls, keep awake, diagnostics,
+updates.
+
+**Theme** is dark by default and always was — a bright screen on a stand is a
+light pointed at the audience — but light and follow-the-phone are now offered,
+because a player reading charts on a bus is not on a stage at the time.
+
+**Controls** is its own screen: the tap zones, the pages shown, the chart text
+size. These are set once, carefully, on a table, and then never touched again.
+Leaving them inline meant the settings somebody does change sat below four
+sliders they had already finished with.
 
 ### Any screen
 
@@ -634,8 +712,11 @@ covered by no test:
 - mDNS discovery on real venue wifi, which is the environment most likely to
   block it.
 - PDF rendering performance on large scanned songbooks.
+- Whether the URL importer copes with the hosts people actually keep charts on.
+  An Ultimate Guitar link goes down a tested path; anything else is fetched and
+  shown to you, which is a design that assumes you will look at it.
 
-Treat v0.1 as something to try at a rehearsal before trusting at a gig.
+Treat v0.1.1 as something to try at a rehearsal before trusting at a gig.
 
 ---
 

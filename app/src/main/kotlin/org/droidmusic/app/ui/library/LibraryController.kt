@@ -27,6 +27,7 @@ import org.droidmusic.library.normaliseForMatching
 import org.droidmusic.music.ChartAnalyzer
 import org.droidmusic.music.Key
 import org.droidmusic.music.SongParser
+import org.droidmusic.session.ChartShare
 
 /** Drives adding, scanning and searching the library. */
 class LibraryController(
@@ -239,6 +240,71 @@ class LibraryController(
         }
     }
 
+    var fetchingUrl by mutableStateOf(false)
+        private set
+    var fetchError by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Fetches a chart from an address the player typed, rather than shared.
+     *
+     * An Ultimate Guitar link goes down the same path a shared one does - the
+     * converter, the metadata, straight into the library - because that path
+     * already knows how to turn one of those pages into a chart.
+     *
+     * Anything else is fetched as a page and handed to [onText] to open in the
+     * editor rather than filed. What comes back from an arbitrary URL is
+     * frequently not what was wanted - a login wall, a listing, the right song
+     * in the wrong format - and seeing it before it is saved is the difference
+     * between noticing that now and finding out on a stand.
+     */
+    fun importFromUrl(url: String, onText: (title: String, text: String) -> Unit) {
+        if (fetchingUrl) return
+        scope.launch {
+            fetchingUrl = true
+            fetchError = null
+
+            if (UltimateGuitar.chartUrlIn(url) != null) {
+                fetchError = importChart(url)
+                fetchingUrl = false
+                return@launch
+            }
+
+            when (val result = WebChart.fetch(url)) {
+                is WebChart.FetchResult.Failed -> fetchError = result.message
+                is WebChart.FetchResult.Ok -> {
+                    val body = result.html
+                    if (body.isBlank()) {
+                        fetchError = "That address returned nothing."
+                    } else {
+                        onText(titleFromUrl(url), body)
+                    }
+                }
+            }
+            fetchingUrl = false
+        }
+    }
+
+    fun dismissFetchError() {
+        fetchError = null
+    }
+
+    /**
+     * A first guess at what the chart is called, from the address.
+     *
+     * A guess, and editable the moment the editor opens - which is why it is
+     * allowed to be wrong. The last path segment is right often enough to save
+     * typing and never load-bearing.
+     */
+    private fun titleFromUrl(url: String): String =
+        url.trim()
+            .substringBefore('?')
+            .trimEnd('/')
+            .substringAfterLast('/')
+            .substringBeforeLast('.')
+            .replace(Regex("[-_+]+"), " ")
+            .trim()
+
     /** Runs the import, returning a message to show if it could not be done. */
     private suspend fun importChart(shared: String): String? {
         // A browser shares the page title and the address together, so the link
@@ -432,6 +498,182 @@ class LibraryController(
     fun dismissError() {
         lastError = null
     }
+
+    // ---- Bulk edit ---------------------------------------------------------
+
+    /**
+     * The charts a bulk action is about.
+     *
+     * Held on the controller rather than in the screen so that it survives the
+     * dialogs the actions put up. A selection that emptied itself because a
+     * confirmation appeared over it would remove nothing and say it had.
+     */
+    var selection by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    var selecting by mutableStateOf(false)
+        private set
+
+    fun startSelecting(first: String? = null) {
+        selecting = true
+        selection = if (first == null) emptySet() else setOf(first)
+    }
+
+    fun stopSelecting() {
+        selecting = false
+        selection = emptySet()
+    }
+
+    fun toggleSelected(id: String) {
+        selection = if (id in selection) selection - id else selection + id
+    }
+
+    fun selectAll(ids: List<String>) {
+        selection = ids.toSet()
+    }
+
+    /** The songs a bulk action applies to, resolved against the current index. */
+    fun selectedSongs(): List<SongRef> = index.value.visible.filter { it.id in selection }
+
+    /**
+     * Sets the key a whole selection is played in.
+     *
+     * Charts that cannot be rewritten are skipped rather than refused: a PDF in
+     * a selection of forty is not a reason to abandon the other thirty-nine, and
+     * there is nothing in a picture of a page to transpose.
+     */
+    fun setTransposeAll(songs: List<SongRef>, semitones: Int, capo: Int) {
+        val ids = songs.filter { it.isTransposable }.map { it.id }.toSet()
+        if (ids.isEmpty()) return
+        scope.launch {
+            repository.updateSongs(ids) { it.withTranspose(semitones, capo) }
+            stopSelecting()
+        }
+    }
+
+    /**
+     * Stops listing a selection of charts, in one write.
+     *
+     * One write rather than one per chart: forty saves racing each other through
+     * the same store is a library that comes back having forgotten an arbitrary
+     * subset. Undo is the "put them all back" in settings rather than the single
+     * chart banner, because a banner naming forty charts is not a banner.
+     */
+    fun removeFromLibraryAll(songs: List<SongRef>) {
+        val ids = songs.map { it.id }.toSet()
+        if (ids.isEmpty()) return
+        scope.launch {
+            repository.updateSongs(ids) { it.copy(hidden = true) }
+            stopSelecting()
+        }
+    }
+
+    // ---- Writing a chart ---------------------------------------------------
+
+    var savingChart by mutableStateOf(false)
+        private set
+    var saveError by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Reads a chart's text so the editor can open it.
+     *
+     * Suspending rather than a property: the chart may be behind a document
+     * provider that has to fetch it, and a composable reading it synchronously
+     * would block the frame drawing the editor.
+     */
+    suspend fun readChartText(song: SongRef): String? = withContext(Dispatchers.IO) {
+        DocumentSources.readChartText(context.contentResolver, Uri.parse(song.uri), song.kind)
+    }
+
+    /**
+     * Writes a chart from the editor.
+     *
+     * Editing rewrites the file behind [replacing] in place, which keeps the
+     * song's id - and that matters more than it looks, because every set list
+     * that contains this chart refers to it by id and a save that produced a new
+     * one would silently empty the running orders it appears in.
+     *
+     * A chart that lives in one of the user's own folders is not written to. The
+     * app holds read access to those, and quietly failing to save somebody's
+     * edit is the worst of the available outcomes, so it says so instead.
+     */
+    fun saveChart(title: String, text: String, replacing: SongRef?, onSaved: (SongRef) -> Unit) {
+        if (savingChart) return
+        scope.launch {
+            savingChart = true
+            saveError = null
+
+            val written = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (replacing != null) rewrite(replacing, title, text)
+                    else write(chartFileName(title), title, text)
+                }
+            }
+
+            savingChart = false
+            written.onSuccess { song ->
+                fileManaged(listOf(song))
+                onSaved(song)
+            }.onFailure { failure ->
+                saveError = failure.message?.trim()?.takeIf { it.isNotEmpty() }
+                    ?.let { "Could not save the chart: $it" }
+                    ?: "Could not save the chart to this device."
+            }
+        }
+    }
+
+    fun dismissSaveError() {
+        saveError = null
+    }
+
+    /** Overwrites a chart this app owns, keeping its id and its place. */
+    private fun rewrite(song: SongRef, title: String, text: String): SongRef {
+        val file = DocumentSources.managedFileOf(context, song)
+            ?: throw IllegalStateException(
+                "that chart lives in one of your own folders, and DroidMusic only has " +
+                    "read access to it",
+            )
+        file.writeText(text)
+        return song.copy(
+            sizeBytes = file.length(),
+            modifiedAt = file.lastModified(),
+            contentHash = DocumentSources.hashOf(text.toByteArray()),
+            title = title.ifBlank { null } ?: song.title,
+            keyText = detectedKey(text) ?: song.keyText,
+        )
+    }
+
+    /** A new chart in the app's own storage. */
+    private fun write(fileName: String, title: String, text: String): SongRef {
+        val directory = File(context.filesDir, MANAGED_DIRECTORY).apply { mkdirs() }
+        val target = File(directory, uniqueName(directory, fileName))
+        target.writeText(text)
+
+        return SongRef(
+            id = DocumentSources.stableId(DocumentSources.MANAGED_SOURCE_ID, target.name),
+            sourceId = DocumentSources.MANAGED_SOURCE_ID,
+            uri = Uri.fromFile(target).toString(),
+            displayName = target.name,
+            kind = FileKind.CHORDPRO,
+            sizeBytes = target.length(),
+            modifiedAt = target.lastModified(),
+            contentHash = DocumentSources.hashOf(text.toByteArray()),
+            title = title.ifBlank { null },
+            keyText = detectedKey(text),
+        )
+    }
+
+    /**
+     * A filename for a chart typed in the app.
+     *
+     * Through [org.droidmusic.session.ChartShare.safeFileName] rather than a
+     * sanitiser of its own, because the rule for "a name that is safe to create"
+     * has one correct answer and it already has tests around it - including the
+     * one that matters, that no input can produce a path.
+     */
+    private fun chartFileName(title: String): String =
+        ChartShare.safeFileName("${title.ifBlank { "Untitled" }}.chopro", fallback = "Untitled")
 
     // ---- What a press and hold offers -------------------------------------
 

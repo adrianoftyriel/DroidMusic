@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -23,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.droidmusic.app.DroidMusicApp
 import org.droidmusic.app.data.AppSettings
@@ -34,7 +36,10 @@ import org.droidmusic.app.diag.DiagnosticsScreen
 import org.droidmusic.app.ui.backstage.BackstageController
 import org.droidmusic.app.ui.backstage.BackstageScreen
 import org.droidmusic.app.ui.library.LibraryController
+import org.droidmusic.app.ui.library.ImportTextDialog
+import org.droidmusic.app.ui.library.ImportUrlDialog
 import org.droidmusic.app.ui.library.LibraryScreen
+import org.droidmusic.app.ui.library.SongEditorScreen
 import org.droidmusic.app.ui.session.SessionCoordinator
 import org.droidmusic.app.ui.session.SessionRole
 import org.droidmusic.app.ui.session.SessionScreen
@@ -42,6 +47,7 @@ import org.droidmusic.app.ui.setlist.AddToSetlistDialog
 import org.droidmusic.app.ui.setlist.SetlistController
 import org.droidmusic.app.ui.setlist.SetlistDetailScreen
 import org.droidmusic.app.ui.setlist.SetlistsScreen
+import org.droidmusic.app.ui.settings.ControlsScreen
 import org.droidmusic.app.ui.settings.FootSwitchSetupScreen
 import org.droidmusic.app.ui.settings.SettingsScreen
 import org.droidmusic.app.update.UpdateController
@@ -124,10 +130,15 @@ fun DroidMusicRoot(
 
     var controlsVisible by remember { mutableStateOf(false) }
 
-    // The chart being filed into a set list, from a long press in the library.
-    // Held here rather than in the library screen because the set lists are not
-    // the library's business.
-    var filingSong by remember { mutableStateOf<SongRef?>(null) }
+    // The charts being filed into a set list, from a long press or a bulk
+    // selection in the library. Held here rather than in the library screen
+    // because the set lists are not the library's business.
+    var filingSong by remember { mutableStateOf<List<SongRef>>(emptyList()) }
+
+    // The two "new chart" flows that begin with a dialog rather than a screen.
+    // Held at the root so the URL fetch survives leaving the library.
+    var importingUrl by remember { mutableStateOf(false) }
+    var importingText by remember { mutableStateOf(false) }
 
     // A finished check goes to the leader, if there is one. Wired here for the
     // same reason as the viewer's position reporter: the check works identically
@@ -354,7 +365,7 @@ fun DroidMusicRoot(
         navigator.go(Screen.Viewer(entry.songId, localised.id, position))
     }
 
-    DroidMusicTheme {
+    DroidMusicTheme(theme = settings.theme) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
@@ -381,6 +392,36 @@ fun DroidMusicRoot(
 
             Box(Modifier.fillMaxSize().then(insets)) {
                 when (val screen = currentScreen) {
+                    Screen.MainMenu -> {
+                        val menuIndex by app.library.index.collectAsState()
+                        val menuBook by setlistController.book.collectAsState()
+                        MainMenuScreen(
+                            librarySummary = if (menuIndex.visible.isEmpty()) {
+                                "Nothing added yet - point it at a folder"
+                            } else {
+                                "${menuIndex.visible.size} charts in " +
+                                    "${menuIndex.sources.size} places"
+                            },
+                            setlistSummary = menuBook.setlists.firstOrNull()?.let { first ->
+                                if (menuBook.setlists.size == 1) {
+                                    "${first.name} - ${first.size} songs"
+                                } else {
+                                    "${menuBook.setlists.size} saved, " +
+                                        "most recently ${first.name}"
+                                }
+                            } ?: "No running orders yet",
+                            sessionSummary = sessionStatus
+                                ?: "Lead the band, or join somebody who is",
+                            settingsSummary = "Name, theme, controls, foot switch, updates",
+                            sessionActive = sessionRole != SessionRole.NONE,
+                            versionName = DroidMusicApp.VERSION,
+                            onOpenLibrary = { navigator.go(Screen.Library) },
+                            onOpenSetlists = { navigator.go(Screen.Setlists) },
+                            onOpenSessions = { navigator.go(Screen.Session) },
+                            onOpenSettings = { navigator.go(Screen.Settings) },
+                        )
+                    }
+
                     Screen.Library -> {
                         LibraryScreen(
                             controller = libraryController,
@@ -388,29 +429,38 @@ fun DroidMusicRoot(
                                 viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
                                 navigator.go(Screen.Viewer(song.id))
                             },
-                            onAddSongToSetlist = { filingSong = it },
-                            onOpenSetlists = { navigator.go(Screen.Setlists) },
-                            onOpenSession = { navigator.go(Screen.Session) },
-                            onOpenSettings = { navigator.go(Screen.Settings) },
+                            onAddSongToSetlist = { filingSong = listOf(it) },
+                            onAddSongsToSetlist = { filingSong = it },
+                            onEditSong = { song ->
+                                navigator.go(Screen.SongEditor(songId = song.id))
+                            },
+                            onNewFromUrl = { importingUrl = true },
+                            onNewFromText = { importingText = true },
+                            onNewBlank = { navigator.go(Screen.SongEditor()) },
                             onScan = { navigator.go(Screen.Capture) },
+                            onBack = { navigator.back() },
                         )
 
                         val filing = filingSong
-                        if (filing != null) {
+                        if (filing.isNotEmpty()) {
                             AddToSetlistDialog(
-                                song = filing,
+                                songs = filing,
                                 controller = setlistController,
-                                onDismiss = { filingSong = null },
+                                onDismiss = { filingSong = emptyList() },
                                 // A toast rather than a trip to the set list. The
                                 // player is filing twenty songs in a row and wants
                                 // to stay where they are; what they need to know is
                                 // that it landed, and which list it landed in.
                                 onAdded = { setlist ->
+                                    val what = filing.singleOrNull()
+                                        ?.let { "\"${it.bestTitle}\"" }
+                                        ?: "${filing.size} charts"
                                     Toast.makeText(
                                         context,
-                                        "Added \"${filing.bestTitle}\" to ${setlist.name}",
+                                        "Added $what to ${setlist.name}",
                                         Toast.LENGTH_SHORT,
                                     ).show()
+                                    libraryController.stopSelecting()
                                 },
                             )
                         }
@@ -476,16 +526,41 @@ fun DroidMusicRoot(
                         onBack = { navigator.back() },
                     )
 
-                    Screen.Session -> SessionScreen(
-                        coordinator = sessionCoordinator,
-                        deviceName = settings.deviceName.ifEmpty { "This device" },
-                        onBack = { navigator.back() },
-                    )
+                    Screen.Session -> {
+                        val sessionBook by setlistController.book.collectAsState()
+                        SessionScreen(
+                            coordinator = sessionCoordinator,
+                            setlists = sessionBook.setlists,
+                            deviceName = settings.deviceName.ifEmpty { "This device" },
+                            onDeviceNameChange = { name ->
+                                app.settings.updateAsync { it.copy(deviceName = name) }
+                            },
+                            onStartWithSetlists = { name, chosen ->
+                                scope.launch {
+                                    sessionCoordinator.startLeading(name)
+                                    // Pushed and checked in the order the sets
+                                    // will be played, so the first one is what
+                                    // Backstage opens on and what the band is
+                                    // asked about first.
+                                    for (setlist in chosen) {
+                                        sessionCoordinator.pushSetlist(setlist)
+                                    }
+                                    chosen.firstOrNull()?.let { first ->
+                                        backstageController.begin(first)
+                                        sessionCoordinator.requestCheck(first)
+                                    }
+                                }
+                                navigator.go(Screen.Backstage)
+                            },
+                            onBack = { navigator.back() },
+                        )
+                    }
 
                     Screen.Settings -> SettingsScreen(
                         settings = settings,
                         onChange = { transform -> app.settings.updateAsync(transform) },
                         onOpenFootSwitchSetup = { navigator.go(Screen.FootSwitchSetup) },
+                        onOpenControls = { navigator.go(Screen.Controls) },
                         onOpenUpdates = { navigator.go(Screen.Updates) },
                         onOpenDiagnostics = { navigator.go(Screen.Diagnostics) },
                         onBack = { navigator.back() },
@@ -503,6 +578,59 @@ fun DroidMusicRoot(
                             viewerController.open(song.id, null, -1, settings.viewer.unicodeAccidentals)
                             navigator.replace(Screen.Viewer(song.id))
                         },
+                    )
+
+                    is Screen.SongEditor -> {
+                        val editorIndex by app.library.index.collectAsState()
+                        val existing = screen.songId?.let { editorIndex.findById(it) }
+
+                        // Read off the main thread. A chart in a Drive folder can
+                        // take a moment to arrive, and blocking the frame that
+                        // draws the editor to wait for it shows a white screen.
+                        val loaded by produceState<String?>(null, existing?.id, screen.seedText) {
+                            value = if (existing == null) {
+                                screen.seedText
+                            } else {
+                                libraryController.readChartText(existing).orEmpty()
+                            }
+                        }
+
+                        loaded?.let { text ->
+                            SongEditorScreen(
+                                existing = existing,
+                                seedText = text,
+                                seedTitle = screen.seedTitle,
+                                saving = libraryController.savingChart,
+                                error = libraryController.saveError,
+                                onSave = { title, body ->
+                                    libraryController.saveChart(
+                                        title = title,
+                                        text = body,
+                                        replacing = existing,
+                                    ) { saved ->
+                                        // Into the viewer, not back to the list.
+                                        // Somebody who has just written a chart
+                                        // wants to see whether it reads properly,
+                                        // and that is the next thing they would
+                                        // tap anyway.
+                                        viewerController.open(
+                                            saved.id,
+                                            null,
+                                            -1,
+                                            settings.viewer.unicodeAccidentals,
+                                        )
+                                        navigator.replace(Screen.Viewer(saved.id))
+                                    }
+                                },
+                                onBack = { navigator.back() },
+                            )
+                        }
+                    }
+
+                    Screen.Controls -> ControlsScreen(
+                        settings = settings,
+                        onChange = { transform -> app.settings.updateAsync(transform) },
+                        onBack = { navigator.back() },
                     )
 
                     Screen.Updates -> UpdatesScreen(
@@ -612,6 +740,38 @@ fun DroidMusicRoot(
                             )
                         }
                     }
+                }
+
+                // Dialogs that belong to no one screen, drawn over whatever is
+                // showing. The URL fetch in particular has to survive the
+                // library being left underneath it.
+                if (importingText) {
+                    ImportTextDialog(
+                        onDismiss = { importingText = false },
+                        onImport = { text ->
+                            importingText = false
+                            navigator.go(Screen.SongEditor(seedText = text))
+                        },
+                    )
+                }
+
+                if (importingUrl) {
+                    ImportUrlDialog(
+                        busy = libraryController.fetchingUrl,
+                        error = libraryController.fetchError,
+                        onDismiss = {
+                            importingUrl = false
+                            libraryController.dismissFetchError()
+                        },
+                        onFetch = { url ->
+                            libraryController.importFromUrl(url) { title, text ->
+                                importingUrl = false
+                                navigator.go(
+                                    Screen.SongEditor(seedText = text, seedTitle = title),
+                                )
+                            }
+                        },
+                    )
                 }
             }
         }

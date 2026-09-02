@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragHandle
@@ -30,6 +33,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +59,7 @@ import org.droidmusic.app.ui.common.EmptyState
 import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.HeaderAction
 import org.droidmusic.app.ui.common.Pill
+import org.droidmusic.app.ui.common.SectionLabel
 import org.droidmusic.app.ui.common.dragToReorder
 import org.droidmusic.app.ui.common.rememberDragReorderState
 import org.droidmusic.library.Setlist
@@ -69,6 +76,11 @@ fun SetlistsScreen(
     var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
 
+    // The set list a press and hold was on, and the one being edited. Held
+    // apart so the edit dialog survives the menu closing under it.
+    var editing by remember { mutableStateOf<Setlist?>(null) }
+    var deleting by remember { mutableStateOf<List<Setlist>>(emptyList()) }
+
     // The other half of "send them to other devices": opening one somebody
     // sent. The manifest also catches a set list tapped in a mail client, but
     // that only fires when the sending app labels it as JSON - plenty do not,
@@ -81,29 +93,75 @@ fun SetlistsScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Header(
-            title = "Set lists",
-            subtitle = "${book.setlists.size} saved",
-            onBack = onBack,
-            actions = {
-                HeaderAction(Icons.Filled.Download, "Open a set list someone sent") {
-                    importFile.launch(
-                        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "*/*"
-                            putExtra(
-                                Intent.EXTRA_MIME_TYPES,
-                                arrayOf("application/json", "text/plain", "application/octet-stream"),
-                            )
-                        },
-                    )
+        if (controller.selecting) {
+            Header(
+                title = if (controller.selection.isEmpty()) {
+                    "Select set lists"
+                } else {
+                    "${controller.selection.size} selected"
+                },
+                subtitle = "Tap to pick, tap again to drop",
+                onBack = { controller.stopSelecting() },
+                actions = {
+                    TextButton(
+                        onClick = { controller.selectAll(book.setlists.map { it.id }) },
+                    ) { Text("All") }
+                    TextButton(onClick = { controller.stopSelecting() }) { Text("Done") }
+                },
+            )
+        } else {
+            Header(
+                title = "Set lists",
+                subtitle = "${book.setlists.size} saved",
+                onBack = onBack,
+                actions = {
+                    HeaderAction(Icons.Filled.Download, "Open a set list someone sent") {
+                        importFile.launch(
+                            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "*/*"
+                                putExtra(
+                                    Intent.EXTRA_MIME_TYPES,
+                                    arrayOf(
+                                        "application/json",
+                                        "text/plain",
+                                        "application/octet-stream",
+                                    ),
+                                )
+                            },
+                        )
+                    }
+                    HeaderAction(Icons.Filled.Checklist, "Bulk edit") {
+                        controller.startSelecting()
+                    }
+                    HeaderAction(Icons.Filled.Add, "New set list") {
+                        newName = ""
+                        creating = true
+                    }
+                },
+            )
+        }
+
+        // Only Delete. It is the one thing that means something done to several
+        // running orders at once - renaming forty is not a thing, and neither
+        // is sending them as one file.
+        if (controller.selecting) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    enabled = controller.selection.isNotEmpty(),
+                    onClick = { deleting = controller.selectedSetlists() },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
-                HeaderAction(Icons.Filled.Add, "New set list") {
-                    newName = ""
-                    creating = true
-                }
-            },
-        )
+            }
+        }
 
         controller.importMessage?.let { message ->
             Text(
@@ -126,36 +184,79 @@ fun SetlistsScreen(
             )
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
+                item {
+                    SectionLabel(
+                        if (controller.selecting) {
+                            "${controller.selection.size} of ${book.setlists.size} selected"
+                        } else {
+                            "hold one for what you can do to it"
+                        },
+                    )
+                }
                 itemsIndexed(book.setlists, key = { _, it -> it.id }) { _, setlist ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpen(setlist) }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                setlist.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            Text(
-                                listOfNotNull(
-                                    "${setlist.size} songs",
-                                    setlist.venue,
-                                    setlist.date,
-                                ).joinToString(" - "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        HeaderAction(Icons.Filled.Share, "Send") { controller.export(setlist) }
-                    }
+                    SetlistRow(
+                        setlist = setlist,
+                        selecting = controller.selecting,
+                        selected = setlist.id in controller.selection,
+                        onClick = {
+                            if (controller.selecting) {
+                                controller.toggleSelected(setlist.id)
+                            } else {
+                                onOpen(setlist)
+                            }
+                        },
+                        onSelect = { controller.toggleSelected(setlist.id) },
+                        onEdit = { editing = setlist },
+                        onSend = { controller.export(setlist) },
+                        onDelete = { deleting = listOf(setlist) },
+                    )
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                 }
             }
         }
+    }
+
+    editing?.let { setlist ->
+        EditSetlistDialog(
+            setlist = setlist,
+            onDismiss = { editing = null },
+            onSave = { name, venue, date ->
+                controller.setDetails(setlist, name, venue, date)
+                editing = null
+            },
+        )
+    }
+
+    if (deleting.isNotEmpty()) {
+        val subjects = deleting
+        AlertDialog(
+            onDismissRequest = { deleting = emptyList() },
+            title = {
+                Text(
+                    subjects.singleOrNull()?.let { "Delete \"${it.name}\"?" }
+                        ?: "Delete ${subjects.size} set lists?",
+                )
+            },
+            text = {
+                Text(
+                    "The running " + (if (subjects.size == 1) "order goes" else "orders go") +
+                        ", along with the key and capo saved against each song in " +
+                        (if (subjects.size == 1) "it" else "them") +
+                        ". No charts are deleted - they stay in the library.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        controller.deleteAll(subjects.map { it.id }.toSet())
+                        deleting = emptyList()
+                    },
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = emptyList() }) { Text("Cancel") }
+            },
+        )
     }
 
     if (creating) {
@@ -182,6 +283,155 @@ fun SetlistsScreen(
             dismissButton = { TextButton(onClick = { creating = false }) { Text("Cancel") } },
         )
     }
+}
+
+/**
+ * One set list in the list of them.
+ *
+ * A tap opens it, a press and hold offers what can be done to it. Once a
+ * selection is running both mean the same thing - pick or drop - because a tap
+ * that opened a running order in the middle of selecting five would lose the
+ * selection.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SetlistRow(
+    setlist: Setlist,
+    selecting: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onSend: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Box {
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("Open the running order") },
+                onClick = { menuOpen = false; onClick() },
+            )
+            DropdownMenuItem(
+                text = { Text("Edit name, venue and date\u2026") },
+                onClick = { menuOpen = false; onEdit() },
+            )
+            DropdownMenuItem(
+                text = { Text("Send to someone") },
+                onClick = { menuOpen = false; onSend() },
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Delete\u2026", color = MaterialTheme.colorScheme.error) },
+                onClick = { menuOpen = false; onDelete() },
+            )
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    if (selected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        Color.Transparent
+                    },
+                )
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { if (selecting) onSelect() else menuOpen = true },
+                    onLongClickLabel = if (selecting) {
+                        "Select this set list"
+                    } else {
+                        "What to do with this set list"
+                    },
+                )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selecting) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = null,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    setlist.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    listOfNotNull(
+                        "${setlist.size} songs",
+                        setlist.venue,
+                        setlist.date,
+                    ).joinToString(" - "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // Hidden while selecting: a send button inside a row being tapped to
+            // select it is a way to share the wrong set list by accident.
+            if (!selecting) {
+                HeaderAction(Icons.Filled.Share, "Send", onSend)
+            }
+        }
+    }
+}
+
+/**
+ * What a set list is called, where it is being played and when.
+ *
+ * Venue and date are free text on purpose. A date picker would insist on a
+ * calendar date, and half of these say "Friday" or "the second night".
+ */
+@Composable
+private fun EditSetlistDialog(
+    setlist: Setlist,
+    onDismiss: () -> Unit,
+    onSave: (name: String, venue: String, date: String) -> Unit,
+) {
+    var name by remember(setlist.id) { mutableStateOf(setlist.name) }
+    var venue by remember(setlist.id) { mutableStateOf(setlist.venue.orEmpty()) }
+    var date by remember(setlist.id) { mutableStateOf(setlist.date.orEmpty()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit set list") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = venue,
+                    onValueChange = { venue = it },
+                    label = { Text("Venue") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = date,
+                    onValueChange = { date = it },
+                    label = { Text("Date") },
+                    placeholder = { Text("Friday, or 14 March") },
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = { onSave(name.trim(), venue.trim(), date.trim()) },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /**
@@ -379,21 +629,27 @@ fun SetlistDetailScreen(
 }
 
 /**
- * Files one chart into a set list, from a long press in the library.
+ * Files charts into a set list, from a press and hold or a selection in the
+ * library.
  *
  * This is deliberately the whole of the flow: the list of set lists, the way to
  * make a new one, and no step in between. Adding a song is something that
  * happens forty times in an evening while the running order is being worked out,
  * and a flow that starts by asking which screen you would like to go to first
  * does not survive that.
+ *
+ * One chart or forty changes the wording and nothing else. A selection goes in
+ * in the order the library was showing it, which is alphabetical - not a running
+ * order, but a starting point that can be dragged into one.
  */
 @Composable
 fun AddToSetlistDialog(
-    song: SongRef,
+    songs: List<SongRef>,
     controller: SetlistController,
     onDismiss: () -> Unit,
     onAdded: (Setlist) -> Unit,
 ) {
+    val what = songs.singleOrNull()?.bestTitle ?: "${songs.size} charts"
     val book by controller.book.collectAsState()
     // With nothing to add to, the choice is not a choice; go straight to making
     // the first set list.
@@ -407,7 +663,11 @@ fun AddToSetlistDialog(
             text = {
                 Column {
                     Text(
-                        "\"${song.bestTitle}\" goes in as the first song.",
+                        if (songs.size == 1) {
+                            "\"$what\" goes in as the first song."
+                        } else {
+                            "$what go in, in the order they are listed."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -424,7 +684,7 @@ fun AddToSetlistDialog(
                 TextButton(
                     enabled = newName.isNotBlank(),
                     onClick = {
-                        onAdded(controller.create(newName.trim(), listOf(song)))
+                        onAdded(controller.create(newName.trim(), songs))
                         onDismiss()
                     },
                 ) { Text("Create and add") }
@@ -440,7 +700,7 @@ fun AddToSetlistDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    song.bestTitle,
+                    what,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
@@ -449,12 +709,14 @@ fun AddToSetlistDialog(
                 for (setlist in book.setlists) {
                     // Said, not prevented. A song that comes back in the encore
                     // is in the set twice, and that is the band's call.
-                    val already = setlist.entries.count { it.songId == song.id }
+                    val already = songs.count { song ->
+                        setlist.entries.any { it.songId == song.id }
+                    }
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clickable {
-                                controller.add(setlist, song)
+                                controller.addAll(setlist, songs)
                                 onAdded(setlist)
                                 onDismiss()
                             }
@@ -467,7 +729,11 @@ fun AddToSetlistDialog(
                                 listOfNotNull(
                                     "${setlist.size} songs",
                                     setlist.venue,
-                                    if (already > 0) "already in this list" else null,
+                                    when {
+                                        already == 0 -> null
+                                        songs.size == 1 -> "already in this list"
+                                        else -> "$already already in this list"
+                                    },
                                 ).joinToString(" - "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
