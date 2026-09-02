@@ -126,6 +126,26 @@ class AdoptTest {
         assertEquals("mine", mine.identity)
     }
 
+    // The key is the band's and the capo is not. A leader who plays everything
+    // with a capo on 3 must not put third-fret shapes on the keyboard player's
+    // screen.
+    @Test
+    fun `an incoming list brings the key and leaves the capo alone`() {
+        val withCapo = fromLeader.copy(
+            entries = fromLeader.entries.map { it.copy(transposeSemitones = 2, capo = 3) },
+        )
+        val here = library.copy(
+            songs = library.songs.map { if (it.id == "local-1") it.copy(userCapo = 5) else it },
+        )
+
+        val taken = SetlistCodec.adopt(withCapo, emptyList(), here, now = 10, newId = ::newId)
+
+        assertEquals(listOf(2, 2, 2), taken.setlist.entries.map { it.transposeSemitones })
+        // This player's own capo for the chart they have; nothing for the one
+        // they have never played, and never the sender's.
+        assertEquals(listOf(5, 0, 0), taken.setlist.entries.map { it.capo })
+    }
+
     @Test
     fun `an adopted list keeps the leader's running order, not a local edit`() {
         val first = SetlistCodec.adopt(fromLeader, emptyList(), library, now = 10, newId = ::newId)

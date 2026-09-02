@@ -198,6 +198,37 @@ class SessionCoordinator(
         }
     }
 
+    /**
+     * The player has chosen a key.
+     *
+     * As leader that is the band's key and goes out at once, rather than
+     * waiting for the next page turn to carry it - the whole point of a shared
+     * key is that nobody is reading the old one in the meantime. As a follower
+     * it is a local override that the leader's next position will overrule, and
+     * it deliberately does *not* report a status: trying a key on your own
+     * screen is not the same as taking control of the set.
+     */
+    fun onLocalTranspose(
+        songId: String?,
+        songTitle: String?,
+        contentHash: String?,
+        page: Int,
+        setlistIndex: Int,
+        transposeSemitones: Int,
+        capo: Int,
+    ) {
+        if (_role.value != SessionRole.LEADER) return
+        server?.announce(
+            setlistIndex = setlistIndex,
+            songId = songId,
+            songTitle = songTitle,
+            contentHash = contentHash,
+            page = page,
+            transposeSemitones = transposeSemitones,
+            capo = capo,
+        )
+    }
+
     fun pushSetlist(setlist: Setlist) {
         server?.pushSetlist(setlist)
     }

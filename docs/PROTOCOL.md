@@ -99,6 +99,16 @@ applied.**
 `contentHash` lets a follower recognise the chart even when its own copy has a
 different id.
 
+**`transposeSemitones` is binding and `capo` is advisory**, and they are not the
+same kind of thing however alike they look. A transposition is the singer saying
+tonight this one is in B flat: a band where that reached one phone is a band
+playing two different songs, so it applies everywhere — and it is announced the
+moment the leader chooses it rather than waiting for the next page turn to carry
+it. A capo changes nothing anybody hears; it is how one guitarist fingers that
+same key, and it means nothing at all to the keyboard player or to the guitarist
+who capos somewhere else. It is sent because "the leader is playing it capo 3"
+is worth knowing, and every device keeps its own.
+
 ### `setlist` — the leader pushing the running order
 
 ```json

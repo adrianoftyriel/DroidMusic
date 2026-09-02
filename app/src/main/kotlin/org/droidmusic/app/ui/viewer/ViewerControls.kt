@@ -119,7 +119,12 @@ fun ViewerControls(
         // page; there is nothing in it the app could rewrite, and offering the
         // control anyway would be a promise the app cannot keep.
         if (chart != null) {
-            TransposeControls(controller, chart, unicodeAccidentals)
+            TransposeControls(
+                controller = controller,
+                result = chart,
+                unicodeAccidentals = unicodeAccidentals,
+                inSession = sessionStatus != null,
+            )
 
             if (analysis != null) {
                 AnalysisSummary(analysis, controller, unicodeAccidentals)
@@ -269,6 +274,7 @@ private fun TransposeControls(
     controller: ViewerController,
     result: TransposeResult,
     unicodeAccidentals: Boolean,
+    inSession: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
@@ -342,6 +348,18 @@ private fun TransposeControls(
                     onClick = { controller.chooseCapo(fret) },
                 )
             }
+        }
+
+        // Said out loud, because the two rows above look alike and are not the
+        // same kind of decision at all. Only while somebody is listening: on a
+        // device playing on its own there is no band for either to reach.
+        if (inSession) {
+            Text(
+                "The key goes to the whole band. The capo is this device's own - " +
+                    "nobody else's screen changes.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

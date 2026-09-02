@@ -52,6 +52,7 @@ import org.droidmusic.app.ui.viewer.ViewerSurface
 import org.droidmusic.library.Setlist
 import org.droidmusic.library.SetlistCodec
 import org.droidmusic.library.SongRef
+import org.droidmusic.session.arrangementFor
 import org.droidmusic.session.songFor
 
 /**
@@ -150,6 +151,22 @@ fun DroidMusicRoot(
         )
     }
 
+    // A new key is broadcast the moment it is chosen. The capo that travels
+    // with it says what this device is fingering and is ignored by everybody
+    // else - see Arrangement in the session core.
+    viewerController.arrangementReporter = {
+        val song = viewerController.song
+        sessionCoordinator.onLocalTranspose(
+            songId = song?.id,
+            songTitle = song?.bestTitle,
+            contentHash = song?.contentHash,
+            page = viewerController.page,
+            setlistIndex = viewerController.setlistIndex,
+            transposeSemitones = viewerController.transposeSemitones,
+            capo = viewerController.capo,
+        )
+    }
+
     // Collected here, not read inside a helper, so every change to any of them
     // recomposes the status strip. See SessionCoordinator.statusLine.
     val sessionRole by sessionCoordinator.role.collectAsState()
@@ -224,10 +241,12 @@ fun DroidMusicRoot(
             viewerController.reportMissing(position.songTitle)
         }
 
+        // The key from the leader, the capo from this device. A leader's capo is
+        // their own fingering and nobody else's - see Arrangement.
+        val arrangement = position.arrangementFor(viewerController.capo)
         viewerController.applyRemote(
             page = position.page,
-            transposeSemitones = position.transposeSemitones,
-            capo = position.capo,
+            transposeSemitones = arrangement.transposeSemitones,
             unicodeAccidentals = settings.viewer.unicodeAccidentals,
         )
     }

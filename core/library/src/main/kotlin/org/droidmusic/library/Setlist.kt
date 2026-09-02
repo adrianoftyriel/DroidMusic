@@ -161,7 +161,7 @@ object SetlistCodec {
     /**
      * Takes a set list from elsewhere and makes it this device's own.
      *
-     * Two jobs, and the second is the one that was missing. Song ids are
+     * Three jobs, and the last two are the ones that were missing. Song ids are
      * rewritten to point at local copies, by content hash and then title, so the
      * entries resolve here. And the list is matched against what this device has
      * already adopted, by [Setlist.identity], so that the same running order
@@ -172,6 +172,9 @@ object SetlistCodec {
      * leader saying what the band is playing tonight; if it disagrees with a
      * local edit, the leader is right, and a set list that quietly kept a
      * follower's older order would be worse than one that changed under them.
+     *
+     * The exception is the capo, which is not the leader's to send. See the
+     * comment on the entries below.
      *
      * [newId] is passed in rather than generated here so the rule stays a pure
      * function - the same inputs give the same list, which is what makes it
@@ -192,7 +195,18 @@ object SetlistCodec {
             id = alreadyHere?.id ?: newId(),
             originId = identity,
             entries = resolution.resolved.map { resolved ->
-                resolved.localSongId?.let { resolved.entry.copy(songId = it) } ?: resolved.entry
+                val local = resolved.localSongId?.let { library.findById(it) }
+                resolved.entry.copy(
+                    songId = local?.id ?: resolved.entry.songId,
+                    // The key travels and the capo does not. A transposition is
+                    // the band's decision about what everyone plays; a capo is
+                    // one guitarist's fingering of it, and putting the sender's
+                    // capo on everybody's screen hands half a band shapes for an
+                    // instrument they are not holding. So each entry keeps
+                    // whatever this player already chose for that song, and
+                    // nothing when they have chosen nothing.
+                    capo = local?.userCapo ?: 0,
+                )
             },
             // Kept from the copy already here, so a list adopted at the start of
             // a rehearsal does not claim to have been created at the moment of

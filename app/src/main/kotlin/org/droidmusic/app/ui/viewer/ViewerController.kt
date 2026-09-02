@@ -43,6 +43,19 @@ class ViewerController(
      */
     var positionReporter: ((page: Int, userInitiated: Boolean) -> Unit)? = null
 
+    /**
+     * Told when the player changes the key, which is not the same event as
+     * moving.
+     *
+     * Separate from [positionReporter] for two reasons. A leader's new key has
+     * to reach the band the moment it is chosen rather than at the next page
+     * turn - a band reading two different keys is the whole problem. And on a
+     * follower it must not count as taking control the way a page turn does:
+     * somebody trying a key on their own screen has not stopped following
+     * anybody.
+     */
+    var arrangementReporter: (() -> Unit)? = null
+
     var song by mutableStateOf<SongRef?>(null)
         private set
     var source by mutableStateOf<PageSource?>(null)
@@ -369,8 +382,17 @@ class ViewerController(
     fun chooseTranspose(semitones: Int) {
         transposeSemitones = Key.foldSemitones(semitones)
         applyTranspose()
+        // The key is the band's business. See arrangementReporter.
+        arrangementReporter?.invoke()
     }
 
+    /**
+     * Puts a capo on, here and nowhere else.
+     *
+     * Deliberately silent: a capo changes nothing anybody hears, only which
+     * shapes this player fingers, and it means nothing at all to the keyboard
+     * player. It is never announced and never taken from anybody else.
+     */
     fun chooseCapo(fret: Int) {
         capo = fret.coerceIn(0, 11)
         applyTranspose()
@@ -396,11 +418,16 @@ class ViewerController(
         syncChart()
     }
 
-    /** Applies a position that came from the band leader. */
-    fun applyRemote(page: Int, transposeSemitones: Int, capo: Int, unicodeAccidentals: Boolean) {
-        if (this.transposeSemitones != transposeSemitones || this.capo != capo) {
+    /**
+     * Applies a position that came from the band leader.
+     *
+     * The key comes from the leader; the capo does not, and is not a parameter
+     * here at all. See Arrangement in the session core for why they are
+     * different kinds of thing.
+     */
+    fun applyRemote(page: Int, transposeSemitones: Int, unicodeAccidentals: Boolean) {
+        if (this.transposeSemitones != transposeSemitones) {
             this.transposeSemitones = transposeSemitones
-            this.capo = capo
             applyTranspose()
         }
         goTo(page, userInitiated = false)

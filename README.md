@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.** Everything described below is implemented. The music theory, set list,
-band-sync and update layers are covered by 350 tests that run on a plain JVM; the
+band-sync and update layers are covered by 354 tests that run on a plain JVM; the
 app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -406,6 +406,13 @@ describing precisely, because it is where this kind of feature usually fails:
 - Turning a page yourself while connected takes control, with one tap to fall
   back in. Otherwise the leader and the player fight over the screen.
 
+**The key is shared and the capo is not.** Transposing is the singer saying
+tonight this one is in B flat, so a leader's key goes to everybody the moment
+they pick it. A capo changes nothing anybody hears — it is how one guitarist
+fingers that key — so it stays on the phone that set it, and means nothing to
+the keyboard player. A set list pushed to the band carries the keys across and
+leaves each player's capo alone.
+
 The leader sees who is in step, who has taken over, and who does not have the
 chart at all — and, before the first song, whether everyone can open every chart
 in tonight's set. See [Backstage](#backstage).
@@ -585,7 +592,7 @@ already on a phone — that install needs an uninstall first, once.
 Being specific about this, because "it builds" and "it works on stage" are
 different claims.
 
-**Tested, by 350 automated tests on the JVM.** Two of these found real bugs
+**Tested, by 354 automated tests on the JVM.** Two of these found real bugs
 during development — the pagination budget check caught a page-break rule that
 could overflow a short viewport, and the chord-word test caught a parser that
 would have rewritten the word "Add" as a chord.
@@ -602,8 +609,8 @@ would have rewritten the word "Add" as a chord.
 | Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned; the ChordPro title block on the first page only |
 | Set lists | Reorder, JSON round trip, malformed input, cross-device matching |
 | Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases; a build that has never heard of a message ignores it rather than dropping the session; a heartbeat reply keeps a quiet follower in the list |
-| Following the leader | Resolving the leader's song against a library that has never seen their ids — by hash, then title, and refusing to guess |
-| Adopting a set list | The same list arriving twice is one list; a list relayed through a second device keeps its identity; a local list is never landed on |
+| Following the leader | Resolving the leader's song against a library that has never seen their ids — by hash, then title, and refusing to guess; the leader's key applying everywhere and their capo nowhere |
+| Adopting a set list | The same list arriving twice is one list; a list relayed through a second device keeps its identity; a local list is never landed on; the keys travel and the capos do not |
 | Diagnostics | Ring buffer keeps the newest and drops the oldest; the rendered log carries its header and says what is in it |
 | Updates | SemVer ordering including `dev.9` against `dev.10`; a release outranking its own pre-releases; downgrades never offered; drafts and APK-less releases skipped; the debug APK never chosen; a real releases payload; checksum parsing |
 | Tap zones | The exact 1/3–2/3 split; mirroring; the menu band across the top, including with tap-to-turn off |

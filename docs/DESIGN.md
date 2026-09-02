@@ -636,6 +636,34 @@ newline framing is only sound if that holds.
 
 ---
 
+### The key is the band's, the capo is yours
+
+Two controls that sit next to each other in the same menu and are not the same
+kind of decision at all.
+
+**A transposition is the band's.** It is the singer saying tonight this one is in
+B flat. A band where that reached one phone is a band playing two different
+songs, so a leader's transposition goes to everyone — and it is broadcast the
+moment it is chosen, not carried along by the next page turn, because the whole
+value of a shared key is that nobody is reading the old one in the meantime.
+
+**A capo is one player's.** It changes nothing anybody hears: it is how a
+guitarist chooses to finger the same key. It means nothing to the keyboard
+player, the horn player, or the guitarist who capos somewhere else. The leader's
+capo used to travel with the position and be applied, which put the leader's
+fingering on everybody's screen — for half a band, shapes for an instrument they
+are not holding.
+
+So the capo in a position is advisory: it says what the leader is fingering, and
+every device keeps its own. The same rule runs through the set list a leader
+pushes: entries carry the key across and take each player's own capo for the
+chart, or none.
+
+The rule lives in `Arrangement` in the session core, as a function with tests
+rather than as a line of UI code, because it is a musical decision that is
+silent when it goes wrong — nobody notices a wrong capo until a guitarist is
+fingering shapes that do not fit the song.
+
 ### Which chart the follower opens
 
 A `position` names a song three ways and only two of them travel. `songId` is
