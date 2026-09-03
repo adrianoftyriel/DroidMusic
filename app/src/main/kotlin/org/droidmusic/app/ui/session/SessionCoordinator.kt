@@ -1,6 +1,7 @@
 package org.droidmusic.app.ui.session
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -145,8 +146,44 @@ class SessionCoordinator(
 
     fun discoverSessions() = discovery.discover()
 
-    suspend fun startLeading(sessionName: String) {
+    /**
+     * Opens a session, on a scope that outlives whatever screen asked for it.
+     *
+     * This exists because the obvious call site is wrong in a way that is
+     * invisible until you try it. The button that starts a session is on a
+     * screen that immediately navigates to Backstage, and a
+     * `rememberCoroutineScope` is cancelled the moment its composable leaves the
+     * composition - so `scope.launch { startLeading() }` followed by a
+     * navigation cancels the start halfway through binding the socket. The
+     * session is torn down before anybody can join it, and the leader is left
+     * looking at an error when they come back.
+     *
+     * [then] runs after the session is up, for the caller that has a running
+     * order to push. It is skipped if the session did not open, because pushing
+     * a set list into a session that does not exist is a no-op that hides the
+     * failure.
+     */
+    fun lead(sessionName: String, then: suspend () -> Unit = {}) {
+        scope.launch {
+            startLeading(sessionName)
+            if (_role.value == SessionRole.LEADER) then()
+        }
+    }
+
+    /**
+     * Private, so [lead] is the only way in.
+     *
+     * Deliberately not callable from a screen. Every caller of this is a button,
+     * every button is in a composable, and a composable's scope is exactly the
+     * one that must not be used - so the type system says no rather than the
+     * next person rediscovering it with two phones and a rehearsal to run.
+     */
+    private suspend fun startLeading(sessionName: String) {
         stop()
+        // Whatever went wrong last time is not what is happening now, and an
+        // error left over from a previous attempt sitting above a session that
+        // is running is worse than no error at all.
+        _message.value = null
         val current = settings.settings.value
         val leaderName = current.deviceName.ifEmpty { "Leader" }
         val charts = ChartServer(scope, context, library)
@@ -166,11 +203,22 @@ class SessionCoordinator(
 
         scope.launch { newServer.state.collect { _leaderState.value = it } }
         scope.launch { newServer.aggregate.collect { _aggregate.value = it } }
-        runCatching { newServer.start() }
-            .onFailure {
-                _message.value = "Could not open a session on this network."
-                stop()
-            }
+        try {
+            newServer.start()
+        } catch (cancelled: CancellationException) {
+            // Not a network failure and must not be reported as one. The only
+            // thing that cancels a start is the caller going away, and telling
+            // the player their wifi is broken because they navigated is how a
+            // real fault gets ignored later. Tear down and re-throw, so the
+            // coroutine machinery sees the cancellation it asked for.
+            stop()
+            throw cancelled
+        } catch (failed: Exception) {
+            Diagnostics.log(Area.LEADER, "could not open a session: ${failed.message ?: failed}")
+            _message.value = "Could not open a session on this network."
+            stop()
+            return
+        }
 
         // Its own library goes into the union like anybody else's, and again
         // whenever it changes - a chart imported during a soundcheck should
@@ -187,6 +235,7 @@ class SessionCoordinator(
 
     fun joinAsFollower(session: DiscoveredSession) {
         stop()
+        _message.value = null
         val current = settings.settings.value
         val newClient = SessionClient(
             scope = scope,

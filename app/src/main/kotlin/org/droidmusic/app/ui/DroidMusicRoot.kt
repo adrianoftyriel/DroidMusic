@@ -16,14 +16,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.droidmusic.app.DroidMusicApp
 import org.droidmusic.app.data.AppSettings
@@ -79,7 +77,6 @@ fun DroidMusicRoot(
     onImmersive: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val navigator = rememberNavigator()
 
     val sessionCoordinator = remember {
@@ -555,8 +552,11 @@ fun DroidMusicRoot(
                             },
                             onOpenBackstage = { navigator.go(Screen.Backstage) },
                             onStartWithSetlists = { name, chosen ->
-                                scope.launch {
-                                    sessionCoordinator.startLeading(name)
+                                // On the coordinator's own scope, because the
+                                // navigation below leaves the Sessions screen
+                                // and anything launched from a composition scope
+                                // would be cancelled mid-bind.
+                                sessionCoordinator.lead(name) {
                                     // Pushed and checked in the order the sets
                                     // will be played, so the first one is what
                                     // Backstage opens on and what the band is

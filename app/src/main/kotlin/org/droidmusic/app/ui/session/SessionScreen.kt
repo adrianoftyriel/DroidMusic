@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.launch
 import org.droidmusic.app.net.DiscoveredSession
 import org.droidmusic.app.ui.common.Dot
 import org.droidmusic.app.ui.common.EmptyState
@@ -70,7 +69,6 @@ fun SessionScreen(
     val message by coordinator.message.collectAsState()
     val sessionLabel by coordinator.sessionLabel.collectAsState()
     val sharing by coordinator.sharing.collectAsState()
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var sessionName by remember { mutableStateOf("") }
     var choosingSetlists by remember { mutableStateOf(false) }
@@ -175,9 +173,10 @@ fun SessionScreen(
                 ) {
                     Button(
                         onClick = {
-                            scope.launch {
-                                coordinator.startLeading(sessionName.ifBlank { deviceName })
-                            }
+                            // Through the coordinator, not this screen's scope:
+                            // the next line disposes this composable, which
+                            // would cancel the start before the socket is bound.
+                            coordinator.lead(sessionName.ifBlank { deviceName })
                             onOpenBackstage()
                         },
                     ) { Text("Ad hoc") }

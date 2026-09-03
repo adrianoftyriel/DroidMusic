@@ -1186,6 +1186,32 @@ cannot send it. A row that fails when tapped would be worse, and hiding the
 chart entirely would be worse still - "Bo has it, get it off him another way" is
 actionable, and silence is not.
 
+### Starting a session never runs on a screen's scope
+
+`SessionCoordinator.lead` exists so that `startLeading` can be private, and
+`startLeading` is private because every plausible caller is wrong.
+
+The button that starts a session immediately navigates to Backstage. A
+`rememberCoroutineScope` is cancelled the moment its composable leaves the
+composition, so `scope.launch { startLeading(name) }; navigate()` cancels the
+start partway through binding the socket - and because the failure arrives as a
+`CancellationException` that `runCatching` happily catches, it was reported as
+"could not open a session on this network". The session was advertised for a
+few milliseconds, torn down, and the leader saw the error only on coming back
+to the Sessions screen. From the band's side it looked like the leader's
+session simply never appeared.
+
+Two rules came out of it, and both are cheap:
+
+- Anything that must outlive the screen that asked for it launches on the
+  coordinator's own scope. There is now no `rememberCoroutineScope` anywhere in
+  the app.
+- `runCatching` is not used around a suspending call. It catches
+  `CancellationException`, which turns "the caller went away" into a fabricated
+  error and leaves the coroutine machinery believing the cancellation was
+  handled. Cancellation is caught by type and re-thrown; real failures are
+  caught separately and logged.
+
 ---
 
 ## 18. Things deliberately not built

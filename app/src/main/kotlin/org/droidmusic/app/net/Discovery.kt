@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import org.droidmusic.app.diag.Area
+import org.droidmusic.app.diag.Diagnostics
 import org.droidmusic.session.SERVICE_TYPE
 
 data class DiscoveredSession(
@@ -158,15 +160,36 @@ class SessionDiscovery(context: Context) {
             setAttribute(ATTR_LEADER, leaderName)
         }
 
+        // Logged rather than ignored. Registering is asynchronous, so a session
+        // that never appears on anybody else's phone fails silently here and
+        // looks like a working session with a shy band - which is unanswerable
+        // from the leader's screen unless the log says otherwise. Android also
+        // renames the service on a name clash, so what got advertised is worth
+        // recording even when it worked.
         val listener = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) = Unit
-            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                Diagnostics.log(
+                    Area.LEADER,
+                    "advertising \"${serviceInfo.serviceName}\" on port $port",
+                )
+            }
+
+            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                Diagnostics.log(
+                    Area.LEADER,
+                    "could not advertise \"$sessionName\": mDNS error $errorCode. " +
+                        "Nobody will see this session.",
+                )
+            }
+
             override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
             override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
         }
 
         runCatching {
             nsdManager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
+        }.onFailure {
+            Diagnostics.log(Area.LEADER, "could not advertise \"$sessionName\": ${it.message ?: it}")
         }
 
         return Registration { runCatching { nsdManager.unregisterService(listener) } }

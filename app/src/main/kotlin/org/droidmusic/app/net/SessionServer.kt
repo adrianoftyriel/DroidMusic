@@ -6,6 +6,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
@@ -154,8 +155,20 @@ class SessionServer(
         _port.value = socket.localPort
 
         // Started before the session is advertised, so the port is real by the
-        // time the first follower is welcomed.
-        runCatching { chartServer?.start() }
+        // time the first follower is welcomed. A chart port that will not bind
+        // is survivable - the leader advertises zero and simply never offers a
+        // chart - but a cancellation is not something to swallow, so it is
+        // caught by type rather than by runCatching.
+        try {
+            chartServer?.start()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failed: Exception) {
+            Diagnostics.log(
+                Area.LEADER,
+                "no chart port: ${failed.message ?: failed}. Charts cannot be sent.",
+            )
+        }
 
         registration = discovery?.advertise(sessionName, leaderName, socket.localPort)
         Diagnostics.log(
