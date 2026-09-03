@@ -75,6 +75,22 @@ class SessionServer(
     private var acceptJob: Job? = null
     private var heartbeatJob: Job? = null
 
+    /**
+     * What this session is playing, and whether the band has been asked to
+     * check it.
+     *
+     * Kept so that a device joining late is caught up rather than left staring
+     * at an empty screen. Ten minutes into a soundcheck is exactly when
+     * somebody's phone finally connects, and until now the leader would have
+     * had to remember to push the running order again for them - which is to
+     * say, it did not happen.
+     */
+    @Volatile
+    private var running: Setlist? = null
+
+    @Volatile
+    private var checkAsked: Setlist? = null
+
     private val _state = MutableStateFlow(LeaderState(sessionName, leaderName))
     val state: StateFlow<LeaderState> = _state.asStateFlow()
 
@@ -303,7 +319,27 @@ class SessionServer(
                 filePort = chartServer?.port?.value ?: 0,
             ),
         )
-        // Bring the newcomer straight to where the band already is.
+        // Catch the newcomer up: the running order first, so the check that
+        // follows has something to be about, and the position last so they land
+        // on the song the band is actually on.
+        //
+        // Sent to this one connection rather than broadcast. Everybody else
+        // already has all of it, and re-pushing a set list to a player mid-song
+        // is a screen change they did not ask for.
+        running?.let { setlist ->
+            val (afterPush, pushSeq) = LeaderSession.nextSeq(_state.value)
+            _state.value = afterPush
+            send(connection, SetlistPush(pushSeq, setlist))
+            Diagnostics.log(
+                Area.SETLIST,
+                "caught up ${hello.deviceName} with \"${setlist.name}\"",
+            )
+        }
+        checkAsked?.let { setlist ->
+            val (afterCheck, checkSeq) = LeaderSession.nextSeq(_state.value)
+            _state.value = afterCheck
+            send(connection, CheckRequest(checkSeq, setlist))
+        }
         _state.value.position?.let { send(connection, it) }
     }
 
@@ -397,6 +433,7 @@ class SessionServer(
      * screen must never show.
      */
     fun requestCheck(setlist: Setlist) {
+        checkAsked = setlist
         val (next, seq) = LeaderSession.nextSeq(_state.value)
         _state.value = LeaderSession.clearReports(next)
         Diagnostics.log(
@@ -407,6 +444,7 @@ class SessionServer(
     }
 
     fun pushSetlist(setlist: Setlist) {
+        running = setlist
         val (next, seq) = LeaderSession.nextSeq(_state.value)
         _state.value = next
         Diagnostics.log(

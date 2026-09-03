@@ -57,6 +57,7 @@ import org.droidmusic.session.Follower
 fun BackstageScreen(
     controller: BackstageController,
     role: SessionRole,
+    sessionLabel: String?,
     reports: List<BackstageReport>,
     followers: List<Follower>,
     onStart: () -> Unit,
@@ -66,13 +67,40 @@ fun BackstageScreen(
 ) {
     val setlist = controller.setlist
     if (setlist == null) {
+        // Three different people can be looking at this, and the old wording
+        // spoke to only one of them. A player who has just joined has not
+        // failed to open a set list - they are waiting on somebody else, and
+        // telling them to start one is both wrong and not theirs to do.
         Column(Modifier.fillMaxSize()) {
-            Header(title = "Backstage", onBack = onBack)
-            EmptyState(
-                title = "Nothing to check",
-                body = "Open a set list and start it, and this screen will make sure every " +
-                    "chart in it opens before the first song.",
+            Header(
+                title = "Backstage",
+                subtitle = sessionLabel,
+                onBack = onBack,
             )
+            when (role) {
+                SessionRole.FOLLOWER -> EmptyState(
+                    title = "Waiting for the running order",
+                    body = "You are in ${sessionLabel ?: "the session"}. When the leader " +
+                        "starts a set, it appears here and this device checks it can open " +
+                        "every chart in it - before the first song rather than during it.\n\n" +
+                        "Nothing else is needed from you. Leave this screen if you like; it " +
+                        "comes back on its own when the leader asks.",
+                )
+
+                SessionRole.LEADER -> EmptyState(
+                    title = "No running order",
+                    body = "This session is sharing as it goes: open a chart and the band " +
+                        "follows you to it.\n\nTo check everyone can open a whole set before " +
+                        "you start, open a set list and start it from there. That is what " +
+                        "fills this screen.",
+                )
+
+                SessionRole.NONE -> EmptyState(
+                    title = "Nothing to check",
+                    body = "Open a set list and start it, and this screen will make sure " +
+                        "every chart in it opens before the first song.",
+                )
+            }
         }
         return
     }

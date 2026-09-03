@@ -76,6 +76,24 @@ A mismatched `protocolVersion` is **refused** with `accepted:false` and a reason
 rather than half-talking to a build that means something different by the same
 message.
 
+**What follows a `welcome`, to that one connection.** A leader that is already
+under way replays enough for the newcomer to be useful immediately, in this
+order:
+
+1. `setlist` — the running order this session is playing, if one has been
+   pushed.
+2. `check` — the readiness request, if the band has been asked one.
+3. `position` — where everyone already is.
+
+Sent to the joining device alone rather than broadcast: everybody else has all
+of it already, and re-pushing a set list to a player mid-song is a screen change
+they did not ask for. The order matters — a check request that arrived before
+the set list it is about would be a question about nothing.
+
+Without this a device that connected ten minutes into a soundcheck received the
+current page and nothing else, and the leader had to remember to push the
+running order again for them, which is to say it did not happen.
+
 ### `position` — where the leader is
 
 ```json

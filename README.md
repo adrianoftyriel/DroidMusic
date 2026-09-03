@@ -442,13 +442,23 @@ the first song. The leader turns a page and everyone's turns.
 
 **Starting one asks what kind of night it is.** *Ad hoc* is the gig called from
 the stage: no running order, and a chart reaches the band when the leader opens
-it. *Choose set lists* sends the running order to everyone who joins — including
-whoever arrives ten minutes late — and goes straight to Backstage, which checks
-before the first song that every device can open every chart in it.
+it. *Choose set lists* sends the running order to everyone who joins and checks,
+before the first song, that every device can open every chart in it.
 
-The device name sits at the top of that screen rather than only in Settings,
-because it is the one thing everybody else sees and the one setting somebody
-wants to fix in the ten seconds before they tap Start.
+**Starting and joining both land on Backstage**, because that is where the
+answer is. A player who has just joined and is waiting on the leader is told so
+there, rather than being shown an empty screen written for somebody else.
+
+**A device that joins late is caught up.** The leader remembers the running
+order it pushed and the check it asked for, and replays both to each new
+connection — so the phone that finally connects ten minutes into the soundcheck
+gets the set without anybody having to remember to push it again. Sent to that
+one device rather than broadcast: everybody else already has it, and re-pushing
+a set list to a player mid-song is a screen change they did not ask for.
+
+The device name sits at the top of the sessions screen rather than only in
+Settings, because it is the one thing everybody else sees and the one setting
+somebody wants to fix in the ten seconds before they tap Start.
 
 Nothing leaves the room: mDNS to discover, a TCP socket to follow, no server
 anywhere.

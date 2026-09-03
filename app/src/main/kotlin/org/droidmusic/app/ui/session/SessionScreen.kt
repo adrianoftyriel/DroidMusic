@@ -61,6 +61,7 @@ fun SessionScreen(
     deviceName: String,
     onDeviceNameChange: (String) -> Unit,
     onStartWithSetlists: (name: String, setlists: List<Setlist>) -> Unit,
+    onOpenBackstage: () -> Unit,
     onBack: () -> Unit,
 ) {
     val role by coordinator.role.collectAsState()
@@ -112,6 +113,14 @@ fun SessionScreen(
                 sessionLabel = sessionLabel,
             ) ?: "Not in a session",
             onBack = onBack,
+            actions = {
+                // Only once there is a session to be backstage of. Leaving the
+                // screen is easy and coming back to it should not mean leaving
+                // the session and rejoining.
+                if (role != SessionRole.NONE) {
+                    TextButton(onClick = onOpenBackstage) { Text("Backstage") }
+                }
+            },
         )
 
         message?.let {
@@ -169,6 +178,7 @@ fun SessionScreen(
                             scope.launch {
                                 coordinator.startLeading(sessionName.ifBlank { deviceName })
                             }
+                            onOpenBackstage()
                         },
                     ) { Text("Ad hoc") }
                     OutlinedButton(
@@ -208,7 +218,10 @@ fun SessionScreen(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { coordinator.joinAsFollower(session) }
+                                .clickable {
+                                    coordinator.joinAsFollower(session)
+                                    onOpenBackstage()
+                                }
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -225,9 +238,12 @@ fun SessionScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            Button(onClick = { coordinator.joinAsFollower(session) }) {
-                                Text("Join")
-                            }
+                            Button(
+                                onClick = {
+                                    coordinator.joinAsFollower(session)
+                                    onOpenBackstage()
+                                },
+                            ) { Text("Join") }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }

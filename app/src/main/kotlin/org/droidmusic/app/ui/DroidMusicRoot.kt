@@ -504,6 +504,7 @@ fun DroidMusicRoot(
                     Screen.Backstage -> BackstageScreen(
                         controller = backstageController,
                         role = sessionRole,
+                        sessionLabel = sessionLabel,
                         reports = leaderState?.reports.orEmpty(),
                         followers = leaderState?.followers.orEmpty(),
                         onStart = {
@@ -534,6 +535,7 @@ fun DroidMusicRoot(
                             onDeviceNameChange = { name ->
                                 app.settings.updateAsync { it.copy(deviceName = name) }
                             },
+                            onOpenBackstage = { navigator.go(Screen.Backstage) },
                             onStartWithSetlists = { name, chosen ->
                                 scope.launch {
                                     sessionCoordinator.startLeading(name)
