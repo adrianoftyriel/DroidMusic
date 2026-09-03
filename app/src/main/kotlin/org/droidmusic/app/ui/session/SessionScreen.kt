@@ -198,34 +198,38 @@ fun SessionScreen(
                             "the app can do about that from the inside.",
                     )
                 } else {
-                    LazyColumn {
-                        items(discovered, key = { it.serviceName }) { session ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { coordinator.joinAsFollower(session) }
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        session.serviceName,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Medium,
-                                    )
-                                    Text(
-                                        session.leaderName?.let { "Led by $it" }
-                                            ?: "${session.host}:${session.port}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Button(onClick = { coordinator.joinAsFollower(session) }) {
-                                    Text("Join")
-                                }
+                    // An ordinary loop, not a LazyColumn. This whole branch
+                    // scrolls - the device name and the two ways to start a
+                    // session are above it - and a lazy list inside a scrolling
+                    // column is measured with no height limit, which throws the
+                    // moment the first session appears. Laziness buys nothing
+                    // here anyway: it is the handful of devices in one room.
+                    for (session in discovered) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { coordinator.joinAsFollower(session) }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    session.serviceName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    session.leaderName?.let { "Led by $it" }
+                                        ?: "${session.host}:${session.port}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                            Button(onClick = { coordinator.joinAsFollower(session) }) {
+                                Text("Join")
+                            }
                         }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     }
                 }
             }
