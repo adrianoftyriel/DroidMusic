@@ -15,7 +15,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -587,8 +586,19 @@ fun DroidMusicRoot(
                         // Read off the main thread. A chart in a Drive folder can
                         // take a moment to arrive, and blocking the frame that
                         // draws the editor to wait for it shows a white screen.
-                        val loaded by produceState<String?>(null, existing?.id, screen.seedText) {
-                            value = if (existing == null) {
+                        //
+                        // A remembered value set from an effect rather than
+                        // produceState, for the reason recorded when the delete
+                        // question moved the same way: lint's
+                        // ProduceStateDoesNotAssignValue loses the assignment
+                        // the moment its right-hand side is anything but a
+                        // plain expression, and arguing with it is not worth a
+                        // build.
+                        var loaded by remember(existing?.id, screen.seedText) {
+                            mutableStateOf<String?>(null)
+                        }
+                        LaunchedEffect(existing?.id, screen.seedText) {
+                            loaded = if (existing == null) {
                                 screen.seedText
                             } else {
                                 libraryController.readChartText(existing).orEmpty()
