@@ -38,9 +38,6 @@ import org.droidmusic.app.ui.session.PeerFetch
 import org.droidmusic.library.LibraryIndex
 import org.droidmusic.session.AggregatedChart
 import org.droidmusic.session.Backstage
-import org.droidmusic.app.ui.session.PeerFetch
-import org.droidmusic.library.LibraryIndex
-import org.droidmusic.session.AggregatedChart
 import org.droidmusic.session.BackstageReport
 import org.droidmusic.session.ChartState
 import org.droidmusic.session.Follower
