@@ -24,7 +24,7 @@ Silent failures need tests, and tests need to be cheap enough that they are run
 constantly. Splitting the core out means:
 
 ```sh
-./gradlew -PcoreOnly coreTests      # 311 tests, no Android SDK, seconds
+./gradlew -PcoreOnly coreTests      # 372 tests, no Android SDK, seconds
 ```
 
 which runs on any machine with a JDK, gates the APK build in CI, and gives a
@@ -900,6 +900,34 @@ same matching a shared `.dmset` goes through.
 ignores them, and it can still follow page turns perfectly. Refusing every older
 device at the door over a readiness check would be a worse answer to a smaller
 problem.
+
+### Every row offers the fix, not just the verdict
+
+The check told a player, correctly, that six charts were missing, and left them
+holding a list. The band's library on the ad hoc screen had already solved that
+problem for the songs nobody planned — tap the row, it comes across — so the
+running order got the same treatment and, deliberately, the same vocabulary:
+*here*, *coming*, *Get*, *Retry*. They are one question asked of two lists and
+nobody should have to learn it twice.
+
+**Why the row does not fetch from the leader.** It fetches from whoever has it.
+The set list is the leader's, but the chart may only exist on the bass player's
+phone, and a row that could only ask the leader would be dark exactly when it
+was needed. `Catalogue.offering` is the join: the set list entry knows a hash
+and a title, the aggregated catalogue knows who published a copy, and the answer
+prefers a device that can actually serve over one that is merely listed.
+
+**Why the check re-runs itself when a chart lands.** The row is not reporting
+what the library index holds; it is reporting whether the file *opens*, and
+nothing but the check can say that. So the arrival of a chart re-runs it. Keyed
+on how many have arrived rather than on the library index, so a background
+rescan does not restart it and a batch of six collapses into one check after the
+last of them — a check already running is cancelled and started again.
+
+**Why one button counts charts and not songs.** A number that comes back in the
+encore is one file. "Get all missing (6)" that fetched five files and one
+duplicate would be lying about the size of the problem in the one place somebody
+is using the count to decide whether to fix it or drop a song.
 
 ---
 

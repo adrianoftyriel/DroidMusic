@@ -19,10 +19,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +42,8 @@ import org.droidmusic.library.LibraryIndex
 import org.droidmusic.session.AggregatedChart
 import org.droidmusic.session.Backstage
 import org.droidmusic.session.BackstageReport
+import org.droidmusic.session.Catalogue
+import org.droidmusic.session.ChartCheck
 import org.droidmusic.session.ChartState
 import org.droidmusic.session.Follower
 
@@ -127,6 +132,29 @@ fun BackstageScreen(
         return
     }
 
+    // What the band has, per song in the running order. The set list already
+    // knows what this device cannot open; the catalogue knows who can supply it,
+    // and joining the two is what turns "Missing" from a fact into a button.
+    val offerFor: (Int) -> AggregatedChart? = { position ->
+        setlist.entries.getOrNull(position)?.let { entry ->
+            Catalogue.offering(aggregate, entry.contentHash, entry.title)
+        }
+    }
+
+    // One row per chart that needs fetching, not per song: a number that comes
+    // back in the encore is one file, and offering to fetch it twice would be
+    // counting the same problem twice.
+    val missing = remember(controller.checks, aggregate, setlist) {
+        val seen = mutableSetOf<String>()
+        controller.checks
+            .filter { it.state == ChartState.MISSING || it.state == ChartState.UNREADABLE }
+            .mapNotNull { check ->
+                val entry = setlist.entries.getOrNull(check.index) ?: return@mapNotNull null
+                if (!seen.add(entry.contentHash ?: entry.title.lowercase())) return@mapNotNull null
+                MissingChart(check, offerFor(check.index))
+            }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Header(
             title = "Backstage",
@@ -153,17 +181,32 @@ fun BackstageScreen(
             OutlinedButton(onClick = { controller.check() }, enabled = !controller.checking) {
                 Text("Check again")
             }
-            // Only a follower can be sent a chart, and only when something is
-            // actually wrong with one. The set list arriving already asked for
-            // whatever the library could not resolve; this is the button for
-            // afterwards, when the check has found a chart that is here and
-            // broken - which that first ask cannot see.
-            if (role == SessionRole.FOLLOWER && !controller.checking &&
-                controller.checks.any {
-                    it.state == ChartState.MISSING || it.state == ChartState.UNREADABLE
+            // The same offer the band's library makes on every row, made once
+            // for the whole running order. A player with six songs missing does
+            // not want to tap six times, and the count is the useful part: it is
+            // the difference between one chart to chase and half the set.
+            val canFix = missing.any { it.offer?.obtainable == true } ||
+                role == SessionRole.FOLLOWER
+            if (missing.isNotEmpty() && canFix && !controller.checking) {
+                OutlinedButton(
+                    onClick = {
+                        // Only the ones somebody can actually send. A copy that
+                        // is listed and unservable would be counted as dealt
+                        // with and quietly never arrive.
+                        val fetchable = missing
+                            .mapNotNull { it.offer?.takeIf(AggregatedChart::obtainable) }
+                            .distinctBy { it.contentHash }
+                        fetchable.forEach(onFetchChart)
+                        // Anything nobody in the band has published falls back to
+                        // asking the leader outright, which reaches a device on
+                        // an older build that announces no catalogue at all.
+                        if (role == SessionRole.FOLLOWER && fetchable.size < missing.size) {
+                            onAskForMissing()
+                        }
+                    },
+                ) {
+                    Text("Get all missing (${missing.size})")
                 }
-            ) {
-                OutlinedButton(onClick = onAskForMissing) { Text("Ask the leader for these") }
             }
         }
 
@@ -171,6 +214,7 @@ fun BackstageScreen(
             item { SectionLabel("Tonight's charts") }
 
             itemsIndexed(controller.checks, key = { index, _ -> index }) { index, check ->
+                val offer = offerFor(check.index)
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -187,17 +231,34 @@ fun BackstageScreen(
                     )
                     Column(Modifier.weight(1f)) {
                         Text(check.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-                        val detail = check.detail ?: wordFor(check.state)
+                        val fetch = offer?.let { peerFetches[it.contentHash] }
+                        val detail = fetch?.failed
+                            ?: fetch?.takeIf { it.inFlight }
+                                ?.let { "coming from ${it.from.ifBlank { "the band" }}" }
+                            ?: check.detail
+                            ?: wordFor(check.state)
                         Text(
                             detail,
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (check.isProblem) {
+                            color = if (check.isProblem || fetch?.failed != null) {
                                 MaterialTheme.colorScheme.error
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
                         )
+                        if (fetch?.inFlight == true) {
+                            LinearProgressIndicator(
+                                progress = { fetch.fraction },
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                            )
+                        }
                     }
+                    ChartAction(
+                        check = check,
+                        offer = offer,
+                        fetch = offer?.let { peerFetches[it.contentHash] },
+                        onFetch = { offer?.let(onFetchChart) },
+                    )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
             }
@@ -337,6 +398,52 @@ fun BackstageScreen(
 
             item { Box(Modifier.height(24.dp)) }
         }
+    }
+}
+
+/** A chart tonight needs and this device cannot open, with whoever has it. */
+private data class MissingChart(val check: ChartCheck, val offer: AggregatedChart?)
+
+/**
+ * The word or the button at the end of a row in the running order.
+ *
+ * Deliberately the same vocabulary as the band's library on the ad hoc screen -
+ * "here", "coming", "Get", "Retry" - because they are the same question asked of
+ * two different lists, and a player should not have to learn it twice.
+ *
+ * A chart that is here says so and offers nothing. One that is not says who can
+ * fix it, and the only case with no button is the one with no answer: nobody in
+ * the session has published a copy.
+ */
+@Composable
+private fun ChartAction(
+    check: ChartCheck,
+    offer: AggregatedChart?,
+    fetch: PeerFetch?,
+    onFetch: () -> Unit,
+) {
+    when {
+        !check.isProblem -> Pill(
+            "here",
+            background = MaterialTheme.colorScheme.primaryContainer,
+            foreground = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+
+        // A different copy is still a copy. The row's colour and its detail line
+        // have already said so; an offer to fetch would be offering a duplicate.
+        check.state == ChartState.DIFFERENT -> Pill("here")
+
+        fetch?.inFlight == true -> Pill("coming")
+
+        offer?.obtainable == true -> TextButton(onClick = onFetch) {
+            Text(if (fetch?.failed != null) "Retry" else "Get")
+        }
+
+        else -> Pill(
+            "missing",
+            background = MaterialTheme.colorScheme.errorContainer,
+            foreground = MaterialTheme.colorScheme.onErrorContainer,
+        )
     }
 }
 

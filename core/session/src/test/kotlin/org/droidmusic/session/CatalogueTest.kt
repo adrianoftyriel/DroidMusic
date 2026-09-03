@@ -222,6 +222,73 @@ class CatalogueTest {
         assertTrue(Catalogue.merge(listOf(device("d1", "Ann", 5001))).isEmpty())
     }
 
+    // What a row in tonight's running order asks: has anybody got this one.
+    @Test
+    fun `a set list entry finds the band's copy by hash first`() {
+        val aggregate = Catalogue.merge(
+            listOf(
+                device("d1", "Ann", 5001, chart("h1", "Wagon Wheel")),
+                device("d2", "Bo", 5002, chart("h2", "Wagon Wheel")),
+            ),
+        )
+
+        // Two different transcriptions of one song; the hash decides which.
+        assertEquals("h2", Catalogue.offering(aggregate, "h2", "Wagon Wheel")?.contentHash)
+        assertEquals("h1", Catalogue.offering(aggregate, "h1", "Wagon Wheel")?.contentHash)
+    }
+
+    // A set list made before anything was hashed carries only a title, and it
+    // still has to find the chart - normalised the same way everything else in
+    // the app matches, so punctuation and a leading "the" do not stop it.
+    @Test
+    fun `an entry with no hash falls back to the title, loosely`() {
+        val aggregate = Catalogue.merge(
+            listOf(device("d1", "Ann", 5001, chart("h1", "The Wagon Wheel"))),
+        )
+
+        assertEquals("h1", Catalogue.offering(aggregate, null, "wagon wheel!")?.contentHash)
+        assertNull(Catalogue.offering(aggregate, null, "Folsom Prison"))
+        assertNull(Catalogue.offering(aggregate, null, "  "))
+    }
+
+    // A hash nobody has is not a licence to hand over a different song of the
+    // same name, but it is not a reason to give up on the title either.
+    @Test
+    fun `an unknown hash still finds a copy by title`() {
+        val aggregate = Catalogue.merge(
+            listOf(device("d1", "Ann", 5001, chart("h1", "Jolene"))),
+        )
+
+        assertEquals("h1", Catalogue.offering(aggregate, "not-a-hash", "Jolene")?.contentHash)
+    }
+
+    // A device that cannot serve still counts as having the chart - the row says
+    // who has it - but one that can serve is the better answer and wins.
+    @Test
+    fun `a copy somebody can actually send is preferred to one that cannot`() {
+        val aggregate = Catalogue.merge(
+            listOf(
+                CatalogueDevice("d1", "Ann", host = "", filePort = 0, charts = listOf(chart("h1", "Jolene"))),
+                device("d2", "Bo", 5002, chart("h1", "Jolene")),
+            ),
+        )
+
+        val found = Catalogue.offering(aggregate, "h1", "Jolene")
+        assertTrue(found!!.obtainable)
+
+        val nobodyServing = Catalogue.merge(
+            listOf(
+                CatalogueDevice("d1", "Ann", host = "", filePort = 0, charts = listOf(chart("h9", "Alone"))),
+            ),
+        )
+        assertFalse(Catalogue.offering(nobodyServing, "h9", "Alone")!!.obtainable)
+    }
+
+    @Test
+    fun `nothing is offered out of an empty session`() {
+        assertNull(Catalogue.offering(emptyList(), "h1", "Jolene"))
+    }
+
     @Test
     fun `uniqueTo counts what would be lost if one device walked out`() {
         val aggregate = Catalogue.merge(

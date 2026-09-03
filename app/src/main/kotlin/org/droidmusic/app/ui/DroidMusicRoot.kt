@@ -502,6 +502,22 @@ fun DroidMusicRoot(
                         val bandLibrary by sessionCoordinator.aggregate.collectAsState()
                         val peerFetches by sessionCoordinator.peerFetches.collectAsState()
                         val backstageIndex by app.library.index.collectAsState()
+                        val sharing by sessionCoordinator.sharing.collectAsState()
+
+                        // A chart that has landed has to stop saying it is
+                        // missing, and only the check can say that - the row is
+                        // reporting whether the file *opens*, which is not
+                        // something the library index knows. Keyed on how many
+                        // have arrived, so it runs once per arrival and not on
+                        // every recomposition; a check already running is
+                        // cancelled and restarted, so a batch of six collapses
+                        // into one check after the last of them.
+                        val arrived = peerFetches.count { it.value.done } + sharing.arrived
+                        LaunchedEffect(arrived) {
+                            if (arrived > 0 && backstageController.setlist != null) {
+                                backstageController.check()
+                            }
+                        }
                         BackstageScreen(
                         controller = backstageController,
                         role = sessionRole,

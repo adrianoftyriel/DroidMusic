@@ -160,6 +160,39 @@ object Catalogue {
         aggregate.filter { library.match(it.contentHash, it.title) == null }
 
     /**
+     * The band's copy of one set list entry, if anybody has one.
+     *
+     * The mirror of [missing]: that asks what of the band's library this device
+     * lacks, and this asks who in the band has a particular song. It is what
+     * lets a row in tonight's running order offer to fetch the chart rather than
+     * only naming it.
+     *
+     * Hash first, then normalised title - the same order everything else in the
+     * app resolves a chart in, so a row offers to fetch exactly what a set list
+     * import would have matched. A copy somebody can actually send is preferred
+     * to one that is merely listed, because the point of the row is the tap.
+     */
+    fun offering(
+        aggregate: List<AggregatedChart>,
+        contentHash: String?,
+        title: String,
+    ): AggregatedChart? {
+        if (!contentHash.isNullOrBlank()) {
+            best(aggregate) { it.contentHash == contentHash }?.let { return it }
+        }
+        val wanted = title.normaliseForMatching()
+        if (wanted.isEmpty()) return null
+        return best(aggregate) { it.title.normaliseForMatching() == wanted }
+    }
+
+    private fun best(
+        aggregate: List<AggregatedChart>,
+        matches: (AggregatedChart) -> Boolean,
+    ): AggregatedChart? =
+        aggregate.firstOrNull { matches(it) && it.obtainable }
+            ?: aggregate.firstOrNull(matches)
+
+    /**
      * Where to fetch a chart from, preferring anywhere but this device.
      *
      * This device can appear among the owners - it announced its own catalogue

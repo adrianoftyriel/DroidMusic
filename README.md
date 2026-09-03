@@ -396,13 +396,27 @@ And none of it blocks anything: the start button works whatever the check says,
 because a band that has decided to busk a song from memory does not need an
 app's permission.
 
-Where a session is running, a player whose check found something can **ask the
-leader for it** from this screen. Pushing the running order already offers
-whatever a library could not resolve — see [Charts that arrive with the set
-list](#charts-that-arrive-with-the-set-list) — and this is the button for
-afterwards, because the check knows something that first offer cannot: a chart
-that resolves perfectly and then will not open is invisible to it, and is exactly
-the one somebody wants a fresh copy of.
+**Every row in the running order says "here" or offers to fix it**, in the same
+words the band's library uses on the ad hoc screen — because they are the same
+question asked of two lists, and nobody should have to learn it twice. A chart
+this device cannot open shows **Get**, and it comes from whoever in the session
+has it, which is not necessarily the leader. While it is on its way the row says
+**coming** and fills a progress bar; if it fails, it says why and offers
+**Retry**. A chart nobody in the session has published says **missing** and
+offers nothing, because there is nothing to offer.
+
+Above the list, **Get all missing (n)** does the lot in one tap. Six songs
+missing is six taps otherwise, and the count is the useful part: it is the
+difference between one chart to chase and half the set. Anything nobody has
+published falls back to asking the leader outright, which reaches a device on an
+older build that announces no catalogue at all.
+
+The check runs again on its own as charts land, so a row stops saying it is
+missing without anybody tapping anything. That matters because the row is
+reporting whether the file *opens* — which the library index cannot tell you —
+and the whole point of this screen is that a chart which resolves perfectly and
+then will not open is invisible to the offer that arrives with the set list. See
+[Charts that arrive with the set list](#charts-that-arrive-with-the-set-list).
 
 ### When something goes wrong
 
@@ -726,6 +740,7 @@ would have rewritten the word "Add" as a chord.
 | Updates | SemVer ordering including `dev.9` against `dev.10`; a release outranking its own pre-releases; downgrades never offered; drafts and APK-less releases skipped; the debug APK never chosen; a real releases payload; checksum parsing |
 | Tap zones | The exact 1/3–2/3 split; mirroring; the menu band across the top, including with tap-to-turn off |
 | Backstage | Every verdict and its wording; silence counted as silence; trouble grouped by song and person; reports replaced, and dropped with the device that sent them |
+| The band's library | Two copies of one song stay two rows; the best-described copy names the row; a device that cannot serve still counts as having it; finding a running order's chart in the band's catalogue by hash, then loosely by title, preferring a copy somebody can send |
 | Zoom to content | Finding the printed box on a page; dust in the margin ignored; light-on-dark and warm-cast scans; content running to the edge; a page with nothing worth cropping |
 | Page detection | A squared-up page, one shot at an angle, a lamp in the corner of the frame, dark music on a light table, a dim photograph, two pages in shot, and every refusal: too small, whole-frame, and not page-shaped |
 | Foot switches | Auto-repeat; contact bounce; unmapped keys passed back to the system; learn mode |
