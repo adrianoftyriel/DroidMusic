@@ -177,12 +177,31 @@ fun ControlsScreen(
             }
 
             SettingRow(
+                title = "Wrap long chart lines",
+                subtitle = "Break a chart line that is wider than the screen instead of " +
+                    "leaving it to be scrolled to sideways. The chords and the words are " +
+                    "broken at the same point, so every chord stays over its own syllable. " +
+                    "Tab and grids are never broken - the columns in them are the notation - " +
+                    "so those still scroll.",
+                trailing = {
+                    Switch(
+                        checked = settings.viewer.wrapChartLines,
+                        onCheckedChange = { on ->
+                            onChange { it.copy(viewer = it.viewer.copy(wrapChartLines = on)) }
+                        },
+                    )
+                },
+            )
+
+            SettingRow(
                 title = "Double tap to zoom",
                 subtitle = "On a scan or a PDF, double tapping crops the margins away and " +
-                    "fills the screen with the music. Double tap again for the whole page. " +
-                    "The cost: where this is possible, a tap has to wait to see whether a " +
-                    "second one is coming, so turning the page by tapping is a little slower. " +
-                    "A foot switch is never affected.",
+                    "fills the screen with the music. On a chord chart it grows the text until " +
+                    "the longest line fills the width. Double tap again to go back. Pinching a " +
+                    "chart works whether this is on or off. The cost: where a double tap can " +
+                    "do something, a tap has to wait to see whether a second one is coming, so " +
+                    "turning the page by tapping is a little slower. A foot switch is never " +
+                    "affected.",
                 trailing = {
                     Switch(
                         checked = settings.viewer.doubleTapToZoom,

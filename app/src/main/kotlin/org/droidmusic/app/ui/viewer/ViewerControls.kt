@@ -139,7 +139,7 @@ fun ViewerControls(
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-            TextControls(preferences, onPreferencesChange)
+            TextControls(controller, preferences, onPreferencesChange)
         } else if (song != null) {
             Text(
                 "This is a ${song.kind.name.lowercase()} file, so it can be turned but not " +
@@ -176,18 +176,29 @@ fun ViewerControls(
  * The size of the chart's text, where there is text to size.
  *
  * Changing the size here re-flows the chart immediately: the viewer works out
- * how many lines fit from the size on screen, so a bigger font is fewer lines a
- * page and more pages, and the reader stays on the line they were reading. That
- * is why this belongs in front of the chart rather than only in Settings - it is
- * something you adjust once you can see the result, standing where you will be
- * standing.
+ * how many lines and how many characters fit from the size on screen, so a
+ * bigger font is fewer lines a page, more pages, and lines wrapped in different
+ * places - and the reader stays on the line they were reading. That is why this
+ * belongs in front of the chart rather than only in Settings: it is something
+ * you adjust once you can see the result, standing where you will be standing.
+ *
+ * Two sizes meet here. A- and A+ move the size in Settings, which is kept; a
+ * pinch and "Fit width" set a zoom on top of it, which is not. The percentage is
+ * the two multiplied together, because what a player wants to know is how big
+ * the text on the screen in front of them is, and Reset clears both.
  */
 @Composable
 private fun TextControls(
+    controller: ViewerController,
     preferences: ViewerPreferences,
     onChange: ((ViewerPreferences) -> ViewerPreferences) -> Unit,
 ) {
+    val onScreen = preferences.chartFontScale * controller.chartTextZoom
+
     Row(
+        // Scrolls rather than wraps, for the same reason the row of buttons at
+        // the foot of the menu does.
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -197,14 +208,30 @@ private fun TextControls(
             selected = false,
             onClick = { onChange { it.copy(chartFontScale = step(it.chartFontScale, -1)) } },
         )
-        Pill("${(preferences.chartFontScale * 100).toInt()}%")
+        Pill("${(onScreen * 100).toInt()}%")
         ChoicePill(
             text = "A+",
             selected = false,
             onClick = { onChange { it.copy(chartFontScale = step(it.chartFontScale, 1)) } },
         )
-        if (preferences.chartFontScale != 1f) {
-            TextButton(onClick = { onChange { it.copy(chartFontScale = 1f) } }) {
+        // The button form of the double tap, offered only when it would change
+        // something - a chart already wider than the screen has no width to
+        // fill, and a control that does nothing when pressed teaches the player
+        // not to trust the ones that do.
+        if (controller.chartZoomAvailable) {
+            ChoicePill(
+                text = "Fit width",
+                selected = controller.zoomed,
+                onClick = { controller.toggleZoom() },
+            )
+        }
+        if (onScreen != 1f) {
+            TextButton(
+                onClick = {
+                    controller.resetChartZoom()
+                    onChange { it.copy(chartFontScale = 1f) }
+                },
+            ) {
                 Text("Reset")
             }
         }

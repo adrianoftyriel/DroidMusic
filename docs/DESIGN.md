@@ -24,7 +24,7 @@ Silent failures need tests, and tests need to be cheap enough that they are run
 constantly. Splitting the core out means:
 
 ```sh
-./gradlew -PcoreOnly coreTests      # 372 tests, no Android SDK, seconds
+./gradlew -PcoreOnly coreTests      # 390 tests, no Android SDK, seconds
 ```
 
 which runs on any machine with a JDK, gates the APK build in CI, and gives a
@@ -763,6 +763,33 @@ the notation occupies perhaps two thirds of the height and half the width, and
 the player is reading something far smaller than their screen could show. A
 double tap crops the margins away and scales what is left to fill the viewport.
 
+The same gesture on a **chord chart** means the same thing and works completely
+differently, because a chart has no margins and no pixels. It is text laid out to
+whatever space it is given, so the only thing to turn is the font size, and
+"fill the screen" becomes: grow the text until the chart's longest line exactly
+fills the width. At that size nothing wraps and nothing scrolls sideways, which
+is the chart equivalent of a page with its margins trimmed.
+
+Two consequences follow from the font size being the knob.
+
+- **Every zoom is a reflow.** A larger font means fewer characters across and
+  fewer lines down, so the chart is re-wrapped and re-paginated on each change —
+  and the reader is put back on the line they were reading, by the rule below.
+- **A chart already wider than the screen is not zoomed at all.** Fitting its
+  width would mean shrinking the text, which is not what anybody double tapping
+  is asking for. The double tap handler is not even registered in that case, so
+  those charts keep their instant tap-to-turn.
+
+**Pinch** covers everything the double tap deliberately does not: any size, in
+either direction, from wherever the player is standing tonight. It is written out
+rather than taken from `detectTransformGestures`, which also claims
+single-finger drags — and on this screen a single-finger drag is how the page is
+scrolled and, through the tap zones, how it is turned. Nothing is consumed until
+a second finger is down and the distance between the two has actually changed.
+The same three operations — bigger, smaller, fill the width — are also buttons in
+the controls, because a pinch needs two free hands and a chart is usually being
+read by somebody holding an instrument.
+
 **Finding the edge of the music.** The page is scanned for the box its content
 sits in. Three decisions in that scan are what make it work on real files rather
 than on clean ones:
@@ -798,12 +825,13 @@ half of a double tap by waiting out the double tap window, so registering a
 double tap handler delays every tap-to-turn by roughly a third of a second. On an
 app whose whole point is turning pages, that is not a footnote.
 
-Two things keep it contained. The handler is registered **only on pages that can
-be zoomed** - a chord chart has no margins to crop and reflows to fit already, so
-it keeps its instant taps. And a foot switch never comes through the tap surface
-at all, so the pedal, which is what most players actually use on stage, is
-untouched either way. For anyone who taps to turn and would rather have the
-instant turn back, the whole thing is one switch in Settings.
+Two things keep it contained. The handler is registered **only where a double tap
+would do something** — a scan with nothing to trim and a chart with no width to
+spare both keep their instant taps. And a foot switch never comes through the tap
+surface at all, so the pedal, which is what most players actually use on stage,
+is untouched either way. For anyone who taps to turn and would rather have the
+instant turn back, the whole thing is one switch in Settings, and pinch, which
+costs nothing, keeps working.
 
 ### Reflow keeps the line, not the page number
 
@@ -812,6 +840,12 @@ font size and the screen. So on rotation the app remembers **which line you were
 reading** and finds the page that now contains it. Restoring "page 3" instead
 would move a reader by an arbitrary amount every single time they turned the
 phone.
+
+The line is remembered as a **song line number**, not as a row of the layout.
+Once lines are wrapped, one song line is two rows at one font size and three at
+the next, so a row index is not a position at all — it means something different
+after every zoom. The song line does not move, which is why every position
+crossing the boundary of the chart layout is one of those.
 
 This also means a phone and a tablet in the same session do not agree on what
 page four of a chart is. The protocol syncs a page number and each device
@@ -834,16 +868,40 @@ object that has never heard of Compose. Three places rewrite a chart (opening
 one, transposing, re-flowing for a new size) and each republishes on the line
 after.
 
-### Monospaced, and horizontally scrolling
+### Monospaced, and wrapped at the same column
 
 Charts are drawn in a monospaced font. Not for looks: the chord sits above the
 exact character it belongs to, and that alignment is only true if every
 character is the same width. In a proportional font the chords drift a little
 further off with every word.
 
-For the same reason a too-wide chart scrolls sideways rather than wrapping. A
-wrapped chord chart puts chords over the wrong words, and a chart that is
-slightly awkward beats one that is wrong.
+That alignment is also why wrapping a chord chart is usually done badly. The
+naive version wraps the lyric row and leaves the chord row alone, and every chord
+after the break then sits over the wrong syllable — wrong in a way the player
+will believe and play. An early version of this app therefore did not wrap at
+all: a too-wide chart scrolled sideways, on the grounds that awkward beats wrong.
+
+But that is an argument against one implementation, not against wrapping. What is
+done instead is to cut **both rows at the same character column**, and then take
+the same number of leading spaces off both. Whatever alignment the two rows had,
+they still have. The cut is only allowed to fall where the column is blank in the
+lyric row *and* blank in the chord row: the first condition is the ordinary "do
+not split a word", and the second is what protects the music, since a column with
+no chord character in it cannot be the middle of a chord symbol. `Am7` is never
+left as `Am` on one row and `7` on the next.
+
+Three things fall out of that rule and are worth stating.
+
+- **Tab and grids are never wrapped.** The column positions inside tablature,
+  and the cells of a grille, are the notation. Both stay whole and scroll
+  sideways, which is also what a chart does for anybody who turns wrapping off.
+- **A wrapped line is not split across a page break.** Half a line of lyric with
+  the rest of it overleaf is the one new failure wrapping could introduce, so
+  pagination keeps the pieces of a line together whenever they fit on a page at
+  all.
+- **A wrapped piece with no chords over it is drawn as one line, not two.**
+  Otherwise every wrapped row would spend a blank line on an empty chord row,
+  which on a phone adds up to a page.
 
 When transposing widens a chord — C becoming D♭ — the **lyric** is padded to
 make room rather than letting the chord slide. The chord stays above its

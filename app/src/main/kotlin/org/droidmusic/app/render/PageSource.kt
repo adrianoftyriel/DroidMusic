@@ -86,7 +86,19 @@ interface RasterPageSource : PageSource {
 /** A page source that produces text rows: chord charts and tab. */
 interface TextPageSource : PageSource {
     fun rowsFor(page: Int): List<ChartRow>
+
+    /** The widest row as laid out, which is what a sideways scroll has to cover. */
     val widestRow: Int
+
+    /**
+     * The widest row *before* wrapping.
+     *
+     * This is the number a fit-to-width zoom needs: the question it answers is
+     * "how large can the font be before the chart's longest line stops fitting",
+     * and the longest line is a property of the chart, not of the width it has
+     * already been wrapped to.
+     */
+    val naturalWidestRow: Int
 }
 
 /**
@@ -269,11 +281,18 @@ class ImagePageSource(
 /**
  * A text chart, laid out into pages for the current viewport.
  *
- * Unlike a PDF this is reflowable, so the page count is not a property of the
- * file. [relayout] is called whenever the viewport or the font size changes, and
- * it deliberately reports how the current position maps onto the new pagination
- * so the viewer can keep the player on the line they were reading rather than on
- * "page 3", which may now be somewhere else entirely.
+ * Unlike a PDF this is reflowable, and doubly so: the page count depends on the
+ * height of the screen, and - once lines are wrapped rather than left to run off
+ * the edge - the *rows* depend on its width and on the font size too. Every
+ * change of viewport, font size or wrap setting therefore goes through
+ * [relayout], which reports where the reader's line ended up so the viewer can
+ * keep them on it rather than on "page 3", which may now be somewhere else
+ * entirely.
+ *
+ * Positions in and out of this class are **song line numbers**, not row
+ * indexes. A row index means nothing across a reflow: wrapping turns one line
+ * into two rows at one font size and three at the next. The song line does not
+ * move.
  */
 class ChartPageSource(
     private val original: Song,
@@ -281,8 +300,16 @@ class ChartPageSource(
 ) : TextPageSource {
 
     private var pages: List<List<ChartRow>> = listOf(emptyList())
-    private var allRows: List<ChartRow> = emptyList()
+
+    /**
+     * The chart's rows before any wrapping, kept because a pinch re-lays out the
+     * chart on every frame of the gesture and turning the song back into rows is
+     * the expensive half. Only a transposition changes them.
+     */
+    private var baseRows: List<ChartRow> = emptyList()
     private var linesPerPage: Int = DEFAULT_LINES_PER_PAGE
+    private var columns: Int = DEFAULT_COLUMNS
+    private var wrapLines: Boolean = true
 
     /** The transposed song currently being shown, and what was done to it. */
     var current: TransposeResult = Transposer.transpose(original, TransposeRequest())
@@ -292,9 +319,11 @@ class ChartPageSource(
     override val isReflowable: Boolean get() = true
     override var widestRow: Int = 0
         private set
+    override var naturalWidestRow: Int = 0
+        private set
 
     init {
-        rebuild(linesPerPage)
+        rebuildRows()
     }
 
     override fun rowsFor(page: Int): List<ChartRow> = pages.getOrElse(page) { emptyList() }
@@ -309,52 +338,57 @@ class ChartPageSource(
      */
     fun pages(): List<List<ChartRow>> = pages
 
-    /** Re-transposes and re-paginates. Returns the page holding [keepRowIndex]. */
-    fun apply(request: TransposeRequest, linesPerPage: Int, keepRowIndex: Int = 0): Int {
+    /** Re-transposes and re-paginates. Returns the page holding [keepSourceLine]. */
+    fun apply(request: TransposeRequest, keepSourceLine: Int = 0): Int {
         current = Transposer.transpose(original, request)
-        this.linesPerPage = linesPerPage
-        rebuild(linesPerPage)
-        return pageContaining(keepRowIndex)
+        rebuildRows()
+        return pageContaining(keepSourceLine)
     }
 
     /**
-     * Re-paginates for a new viewport, keeping the reader in place.
+     * Re-wraps and re-paginates for a new viewport, keeping the reader in place.
      *
-     * Returns the page that now holds the row they were looking at. The row
-     * index, not the page number, is the durable thing across a rotation.
+     * Returns the page that now holds the line they were reading.
      */
-    fun relayout(linesPerPage: Int, keepRowIndex: Int): Int {
+    fun relayout(
+        linesPerPage: Int,
+        columns: Int,
+        wrapLines: Boolean,
+        keepSourceLine: Int,
+    ): Int {
         this.linesPerPage = linesPerPage
-        rebuild(linesPerPage)
-        return pageContaining(keepRowIndex)
+        this.columns = columns
+        this.wrapLines = wrapLines
+        relayoutRows()
+        return pageContaining(keepSourceLine)
     }
 
-    /** The index, in the full row list, of the first row on [page]. */
-    fun firstRowIndexOf(page: Int): Int {
-        var index = 0
-        for (i in 0 until page.coerceIn(0, pages.size)) index += pages[i].size
-        return index
+    /** The song line [page] starts on: the reader's position, durably. */
+    fun sourceLineOf(page: Int): Int =
+        ChartLayout.firstSourceLineOf(pages.getOrElse(page) { emptyList() })
+
+    private fun pageContaining(sourceLine: Int): Int =
+        ChartLayout.pageContainingSourceLine(pages, sourceLine)
+
+    private fun rebuildRows() {
+        baseRows = ChartLayout.rows(current.song, unicodeAccidentals)
+        naturalWidestRow = ChartLayout.widestRow(baseRows)
+        relayoutRows()
     }
 
-    private fun pageContaining(rowIndex: Int): Int {
-        var seen = 0
-        for ((index, page) in pages.withIndex()) {
-            seen += page.size
-            if (rowIndex < seen) return index
-        }
-        return (pages.size - 1).coerceAtLeast(0)
-    }
-
-    private fun rebuild(linesPerPage: Int) {
-        allRows = ChartLayout.rows(current.song, unicodeAccidentals)
-        widestRow = ChartLayout.widestRow(allRows)
-        pages = ChartLayout.paginate(allRows, linesPerPage)
+    private fun relayoutRows() {
+        val laid = if (wrapLines) ChartLayout.wrap(baseRows, columns) else baseRows
+        widestRow = ChartLayout.widestRow(laid)
+        pages = ChartLayout.paginate(laid, linesPerPage)
     }
 
     override fun close() = Unit
 
     companion object {
         const val DEFAULT_LINES_PER_PAGE = 30
+
+        /** A common chart width, used only until the screen has been measured. */
+        const val DEFAULT_COLUMNS = 60
 
         /**
          * The exception, and everything underneath it.

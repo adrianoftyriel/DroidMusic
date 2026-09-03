@@ -1,4 +1,6 @@
 .gradle/
+# Kotlin 2.x scratch directory, including compiler daemon logs.
+.kotlin/
 build/
 */build/
 */*/build/

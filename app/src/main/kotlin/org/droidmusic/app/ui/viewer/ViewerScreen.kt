@@ -2,6 +2,9 @@ package org.droidmusic.app.ui.viewer
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,8 +34,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -40,8 +46,31 @@ import kotlinx.coroutines.withContext
 import org.droidmusic.app.input.PageAction
 import org.droidmusic.app.render.RasterPageSource
 import org.droidmusic.app.render.TextPageSource
+import org.droidmusic.music.ChartLayout
 import org.droidmusic.music.ChartRow
 import org.droidmusic.music.RowKind
+
+/** The size a chart is drawn at before the player's preference and any zoom. */
+private const val BASE_CHART_FONT_SP = 15f
+
+/**
+ * Line spacing, as a multiple of the font size.
+ *
+ * One number, used for the on-screen line height *and* for working out how many
+ * lines fit on a page. They have to be the same number or the page holds a
+ * different amount than it was paginated for, which shows up as the last line of
+ * every page being cut in half.
+ */
+private const val CHART_LINE_SPACING = 1.45f
+
+private val CHART_PADDING_H = 12.dp
+private val CHART_PADDING_V = 8.dp
+
+/**
+ * A string long enough that measuring it and dividing averages away the rounding
+ * in a single character's advance width.
+ */
+private const val MEASURING_STICK = "0000000000000000"
 
 /**
  * The page itself, and the tap surface over it.
@@ -58,6 +87,7 @@ fun ViewerSurface(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
 
     BoxWithConstraints(
         modifier = modifier
@@ -69,34 +99,87 @@ fun ViewerSurface(
         val widthPx = with(density) { maxWidth.roundToPx() }
         val heightPx = with(density) { maxHeight.roundToPx() }
 
-        // How many lines of chart fit, which is what pagination needs. Derived
-        // from the actual viewport rather than assumed, so a fold, a split screen
-        // and a 12-inch tablet all get a full page rather than a guess.
-        val fontSizeSp = 15f * preferences.chartFontScale
-        val lineHeightPx = with(density) { (fontSizeSp * 1.45f).sp.toPx() }
-        val linesThatFit = ((heightPx - with(density) { 24.dp.toPx() }) / lineHeightPx)
-            .toInt()
-            .coerceAtLeast(4)
+        // The size the chart would be drawn at with no zoom: the player's chosen
+        // size, scaled by whatever they have pinched to. Measured at *this* size
+        // rather than the final one because the fit-to-width zoom is worked out
+        // from the measurement, and measuring at a size that depended on it
+        // would be circular. A monospaced font scales linearly, so one
+        // measurement serves every scale.
+        val baseFontSizeSp = BASE_CHART_FONT_SP * preferences.chartFontScale * controller.chartZoom
+        val charWidthPx = remember(measurer, baseFontSizeSp) {
+            measurer.measure(
+                text = AnnotatedString(MEASURING_STICK),
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = baseFontSizeSp.sp,
+                ),
+            ).size.width.toFloat() / MEASURING_STICK.length
+        }
 
-        LaunchedEffect(widthDp, heightDp, linesThatFit, preferences.pageModeOverride) {
+        // Charts are laid out per page column, not per window: in a two-page
+        // spread each chart has half the width to wrap into.
+        val pagesShown = PageLayoutRules
+            .modeFor(widthDp, heightDp, preferences.pageModeOverride)
+            .pagesShown
+        val chartWidthPx = (
+            widthPx.toFloat() / pagesShown - with(density) { CHART_PADDING_H.toPx() } * 2
+            ).coerceAtLeast(1f)
+
+        LaunchedEffect(
+            controller.source,
+            controller.transposeSemitones,
+            controller.capo,
+            chartWidthPx,
+            charWidthPx,
+        ) {
+            controller.onChartMeasured(chartWidthPx, charWidthPx)
+        }
+
+        val fontSizeSp = baseFontSizeSp * controller.chartFitZoom
+        val lineHeightPx = with(density) { (fontSizeSp * CHART_LINE_SPACING).sp.toPx() }
+
+        // How many lines and characters of chart fit, which is what pagination
+        // and wrapping need. Derived from the actual viewport rather than
+        // assumed, so a fold, a split screen and a 12-inch tablet all get a full
+        // page rather than a guess.
+        val linesThatFit = ChartLayout.linesThatFit(
+            heightPx = heightPx - with(density) { CHART_PADDING_V.toPx() } * 2,
+            lineHeightPx = lineHeightPx,
+        )
+        val columnsThatFit = ChartLayout.columnsThatFit(
+            widthPx = chartWidthPx,
+            charWidthPx = charWidthPx * controller.chartFitZoom,
+        )
+
+        LaunchedEffect(
+            widthDp,
+            heightDp,
+            linesThatFit,
+            columnsThatFit,
+            preferences.wrapChartLines,
+            preferences.pageModeOverride,
+        ) {
             controller.onViewportChanged(
                 widthDp = widthDp,
                 heightDp = heightDp,
                 linesThatFit = linesThatFit,
+                columnsThatFit = columnsThatFit,
+                wrapLines = preferences.wrapChartLines,
                 override = preferences.pageModeOverride,
             )
         }
 
-        // Only pages that are pictures can be cropped to their content, so only
-        // those get a double tap handler.
+        // Only pages with something to gain get a double tap handler.
         //
         // That is not tidiness. Compose can only tell a single tap from the first
         // half of a double tap by waiting out the double tap window, so wherever
         // onDoubleTap is registered, turning the page by tapping is delayed by
-        // roughly a third of a second. Registering it on chord charts, which have
-        // no margins to crop and nothing to zoom, would spend that delay for
-        // nothing. Foot switches never come through here and are never slowed.
-        val zoomable = preferences.doubleTapToZoom && controller.source is RasterPageSource
+        // roughly a third of a second. A scan always has margins to trim; a chart
+        // only has width going to waste if its longest line is shorter than the
+        // screen, and where it is not, the handler is left off and the taps stay
+        // instant. Foot switches never come through here and are never slowed.
+        val zoomable = preferences.doubleTapToZoom &&
+            (controller.source is RasterPageSource || controller.chartZoomAvailable)
 
         Box(
             Modifier
@@ -126,7 +209,17 @@ fun ViewerSurface(
                             }
                         },
                     )
-                },
+                }
+                // After the tap handler in the chain, which makes it the inner
+                // one: a second finger is claimed here before the tap detector
+                // above can read the gesture as a page turn. On the tap surface
+                // rather than on the text, so it covers the whole window - a
+                // chart narrower than the screen is exactly the one somebody
+                // wants to make bigger.
+                .pinchToZoom(
+                    enabled = controller.source is TextPageSource,
+                    onPinch = controller::pinchChart,
+                ),
         ) {
             when {
                 controller.loading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
@@ -274,9 +367,14 @@ private fun PageContent(
  *
  * The chord row and the lyric row are drawn as two separate monospaced lines
  * with no space between them, which is what makes the chord sit above its
- * syllable. It is also why the whole thing scrolls horizontally rather than
- * wrapping: a wrapped chord chart puts chords over the wrong words, and a chart
- * that is slightly too wide and scrolls is far better than one that is wrong.
+ * syllable. Neither is allowed to wrap here: any line that needed breaking was
+ * broken by ChartLayout.wrap, which cuts both rows at the same character column
+ * so the chords stay over their words. Compose wrapping them independently is
+ * exactly the failure that has to be avoided.
+ *
+ * The page still scrolls sideways, for the two cases wrapping leaves behind:
+ * tablature, which is never reflowed because its columns are the notation, and a
+ * player who has turned wrapping off.
  */
 @Composable
 private fun ChartPage(rows: List<ChartRow>, fontSizeSp: Float, dark: Boolean) {
@@ -289,7 +387,7 @@ private fun ChartPage(rows: List<ChartRow>, fontSizeSp: Float, dark: Boolean) {
         modifier = Modifier
             .fillMaxSize()
             .horizontalScroll(scroll)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = CHART_PADDING_H, vertical = CHART_PADDING_V),
         verticalArrangement = Arrangement.Top,
     ) {
         for (row in rows) {
@@ -346,6 +444,36 @@ private fun ChartPage(rows: List<ChartRow>, fontSizeSp: Float, dark: Boolean) {
     }
 }
 
+/**
+ * A two-finger pinch, and deliberately nothing else.
+ *
+ * Written out rather than using `detectTransformGestures` because that one also
+ * claims single-finger drags, which on this screen are how the page is scrolled
+ * sideways and - through the tap zones over it - how it is turned. Nothing is
+ * consumed until a second finger is down and the distance between the two has
+ * actually changed, so a tap, a drag and a foot switch all behave exactly as they
+ * did before.
+ */
+private fun Modifier.pinchToZoom(
+    enabled: Boolean,
+    onPinch: (Float) -> Unit,
+): Modifier = pointerInput(enabled) {
+    if (!enabled) return@pointerInput
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        do {
+            val event = awaitPointerEvent()
+            if (event.changes.count { it.pressed } >= 2) {
+                val zoom = event.calculateZoom()
+                if (zoom > 0f && zoom != 1f) {
+                    onPinch(zoom)
+                    event.changes.forEach { it.consume() }
+                }
+            }
+        } while (event.changes.any { it.pressed })
+    }
+}
+
 @Composable
 private fun ChartLine(
     text: String,
@@ -357,7 +485,7 @@ private fun ChartLine(
     Text(
         text = text,
         fontSize = fontSizeSp.sp,
-        lineHeight = (fontSizeSp * 1.45f).sp,
+        lineHeight = (fontSizeSp * CHART_LINE_SPACING).sp,
         color = color,
         fontFamily = FontFamily.Monospace,
         fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,

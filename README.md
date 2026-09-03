@@ -14,7 +14,7 @@ result the way an arranger would write it.
 ## Status
 
 **v0.1.1-dev.** Everything described below is implemented. The music theory, set
-list, band-sync and update layers are covered by 354 tests that run on a plain
+list, band-sync and update layers are covered by 390 tests that run on a plain
 JVM; the app layer adds its own.
 
 CI builds an installable APK and an AAB from a clean checkout on every push.
@@ -315,9 +315,31 @@ appear to do nothing at all.
 The zoom stays on across page turns, with each page measuring its own margins.
 The cost is one third of a second: where a double tap is possible, a single tap
 has to wait to see whether a second one is coming before it turns the page. That
-delay never applies to chord charts, which have nothing to crop, and never to a
-foot switch. There is a switch in Settings for anyone who would rather have the
-instant tap back.
+delay never applies to a foot switch, and it is not spent where a double tap
+could not do anything - a scan with no margins to trim, or a chart already wider
+than the screen. There is a switch in Settings for anyone who would rather have
+the instant tap back.
+
+**Chord charts zoom too, by growing the text.** A chart has no margins and no
+pixels; it is text laid out to the space it is given, so the only thing to turn
+is the font size. Double tapping one grows the text until its longest line
+exactly fills the width - the same promise as cropping a scan, spend the space
+that is going to waste - and pinching sets any size in either direction. Both
+re-wrap and re-paginate the chart, and both put you back on the line you were
+reading rather than on the page number you were on. The same three operations,
+bigger, smaller and fill the width, are buttons in the controls as well, because
+a pinch needs two free hands and a chart is usually being read by somebody
+holding an instrument.
+
+**A chart line too wide for the screen is wrapped, without moving the chords.**
+This is the part usually done wrong: wrap the words, leave the chord line alone,
+and every chord after the break sits over the wrong syllable - wrong in a way you
+will believe and play. Instead both rows are cut at the same character column and
+the same indent is taken off both, so a chord that was above its syllable still
+is. The cut may only fall where the column is blank in *both* rows, which is what
+stops `Am7` becoming `Am` and `7`. Tab and grids are never wrapped - the columns
+in them are the notation - and neither is anything else if you turn wrapping off
+in Settings, in which case a wide chart scrolls sideways as before.
 
 ### Set lists
 
@@ -731,7 +753,8 @@ would have rewritten the word "Add" as a chord.
 | Transposition | Whole-chart spelling consistency; slash basses; capo semantics; round trips at all 11 intervals |
 | Key detection | Major, minor, flat keys; survives transposition to all 12 keys; confidence ordering |
 | Analysis | Non-diatonic chords; capo suggestions; tab detection |
-| Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned; the ChordPro title block on the first page only |
+| Pagination | No page over budget at any size from 1 line up; no row lost or duplicated; headers never orphaned; the ChordPro title block on the first page only; a wrapped line never split across a break |
+| Line wrapping | Every chord still over its own syllable at every width from 12 columns up; no chord symbol split; no word lost; tab left alone; a word longer than the screen; nothing wrapped at a fit-to-width zoom |
 | Set lists | Reorder, JSON round trip, malformed input, cross-device matching |
 | Band sync | Wire round trip for every message; stale and duplicate positions; the full follower state machine including the reconnect cases; a build that has never heard of a message ignores it rather than dropping the session; a heartbeat reply keeps a quiet follower in the list |
 | Following the leader | Resolving the leader's song against a library that has never seen their ids — by hash, then title, and refusing to guess; the leader's key applying everywhere and their capo nowhere |

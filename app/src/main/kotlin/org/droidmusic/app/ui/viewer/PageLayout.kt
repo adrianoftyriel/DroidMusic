@@ -39,14 +39,31 @@ data class ViewerPreferences(
     val unicodeAccidentals: Boolean = true,
     val chartFontScale: Float = 1f,
     /**
-     * Double tap a scanned page to crop its margins away and fill the screen.
+     * Break a chart line that is too wide for the screen, rather than let it run
+     * off the edge and be scrolled to.
+     *
+     * On by default, which reverses an earlier decision here and is worth saying
+     * why. The objection to wrapping a chord chart is real: wrap the words and
+     * leave the chords where they are and every chord after the break sits over
+     * the wrong syllable. But that is an argument against *that* implementation,
+     * not against wrapping - both rows are cut at the same character column, so
+     * the chords come with their words (see ChartLayout.wrap). What is left is a
+     * plain trade: a wrapped line reads as two lines, an unwrapped one is read
+     * by dragging the page sideways with the hand that should be on an
+     * instrument. Anyone who prefers the drag turns this off.
+     */
+    val wrapChartLines: Boolean = true,
+    /**
+     * Double tap to fill the screen with the music: a scan is cropped to its
+     * margins, and a chart's text grows until its longest line fills the width.
      *
      * On by default, and it has a cost worth knowing about: a single tap can
      * only be told from the first half of a double tap by waiting to see whether
      * a second one arrives, so wherever zooming is possible a tap to turn the
      * page waits out that window first. Turning this off gives the instant turn
-     * back. A foot switch is never affected either way - it does not go through
-     * the tap surface at all.
+     * back, and leaves pinching a chart, which costs nothing, working. A foot
+     * switch is never affected either way - it does not go through the tap
+     * surface at all.
      */
     val doubleTapToZoom: Boolean = true,
 )

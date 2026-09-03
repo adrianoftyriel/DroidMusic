@@ -18,6 +18,7 @@ import org.droidmusic.library.SongRef
 import org.droidmusic.music.ChartAnalysis
 import org.droidmusic.music.ChartRow
 import org.droidmusic.music.ChartAnalyzer
+import org.droidmusic.music.ChartZoom
 import org.droidmusic.music.Key
 import org.droidmusic.music.TransposeRequest
 import org.droidmusic.music.TransposeResult
@@ -66,7 +67,15 @@ class ViewerController(
         private set
 
     /**
-     * Whether pages are cropped to their content rather than shown whole.
+     * Whether the music is filling the screen rather than being shown whole.
+     *
+     * It means two different things for the two kinds of document, because the
+     * two have nothing in common but the intent: on a scan or a PDF the page is
+     * cropped to the box the music sits in, and on a text chart the font grows
+     * until the widest line fills the width. Same gesture, same promise - spend
+     * the space that is going to waste - and one flag, so a player who has asked
+     * for bigger music keeps it as the set list moves from a scan to a ChordPro
+     * file and back.
      *
      * Deliberately kept across page turns and across songs. A player who zooms
      * in is telling the app that this stand, at this distance, needs the music
@@ -81,6 +90,83 @@ class ViewerController(
     fun toggleZoom() {
         zoomed = !zoomed
     }
+
+    /**
+     * The chart font scale the player has pinched to, on top of the size they
+     * chose in Settings.
+     *
+     * Held here rather than saved, and deliberately: the Settings size is "how
+     * big I like charts", this is "how far away the stand is tonight". It
+     * survives page turns and songs for the same reason [zoomed] does, and does
+     * not survive the app being closed.
+     */
+    var chartZoom by mutableStateOf(1f)
+        private set
+
+    /**
+     * What a fit-to-width zoom would multiply the font by, from the last
+     * measurement of the screen. 1 means there is nothing to gain.
+     */
+    var chartFitScale by mutableStateOf(1f)
+        private set
+
+    /** True when filling the width would actually make the chart bigger. */
+    val chartZoomAvailable: Boolean
+        get() = chartSource != null && ChartZoom.worthZooming(chartFitScale)
+
+    /**
+     * The fit-to-width factor actually in force: 1 unless the player has asked
+     * to fill the width and there is width to fill.
+     *
+     * Kept separate from [chartZoom] rather than folded into it because the
+     * viewer measures a character at the [chartZoom] size and works the fit out
+     * from that measurement. Folding the answer back into what it was measured
+     * from would be circular.
+     */
+    val chartFitZoom: Float
+        get() = if (zoomed && chartZoomAvailable) ChartZoom.clamp(chartFitScale) else 1f
+
+    /** Everything the chart font is multiplied by: the pinch and the fit. */
+    val chartTextZoom: Float get() = chartZoom * chartFitZoom
+
+    /**
+     * Told how wide the chart column is and how wide one character is in it, so
+     * a fit-to-width zoom knows what it would be fitting. Called by the viewer
+     * whenever it measures, since only the renderer knows the font metrics.
+     */
+    fun onChartMeasured(contentWidthPx: Float, charWidthPx: Float) {
+        chartFitScale = ChartZoom.fitWidthScale(
+            widestRowChars = chartSource?.naturalWidestRow ?: 0,
+            availableWidthPx = contentWidthPx,
+            charWidthPx = charWidthPx,
+        )
+    }
+
+    /**
+     * A pinch. [factor] is the change the gesture asks for.
+     *
+     * Whatever fit-to-width had done is folded into the new scale first, so the
+     * chart grows from the size that is on screen rather than jumping back to
+     * the Settings size and then growing. A pinch is the player taking the
+     * zoom into their own hands, so it also clears [zoomed].
+     */
+    fun pinchChart(factor: Float) {
+        if (!factor.isFinite() || factor <= 0f) return
+        chartZoom = ChartZoom.clamp(chartTextZoom * factor)
+        zoomed = false
+    }
+
+    /** The bigger and smaller buttons in the controls, for players not pinching. */
+    fun stepChartZoom(larger: Boolean) {
+        chartZoom = ChartZoom.step(chartTextZoom, larger)
+        zoomed = false
+    }
+
+    fun resetChartZoom() {
+        chartZoom = 1f
+        zoomed = false
+    }
+
     var loading by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
@@ -123,12 +209,14 @@ class ViewerController(
         private set
 
     /**
-     * The row of the chart at the top of the current page.
+     * The song line at the top of the current page.
      *
      * Tracked because it, not the page number, is what a reflowable chart has to
-     * preserve across a rotation. See [onViewportChanged].
+     * preserve across a rotation, a font change or a re-wrap. A row index would
+     * not do: wrapping turns one line into a different number of rows at every
+     * width. See [onViewportChanged].
      */
-    private var topRowIndex = 0
+    private var topSourceLine = 0
 
     /**
      * Set when we arrive at a song by turning *backwards* into it, so the load
@@ -141,6 +229,8 @@ class ViewerController(
      */
     private var openAtLastPage = false
     private var linesPerPage = ChartPageSource.DEFAULT_LINES_PER_PAGE
+    private var columns = ChartPageSource.DEFAULT_COLUMNS
+    private var wrapLines = true
 
     /**
      * Pages in the open document.
@@ -250,7 +340,15 @@ class ViewerController(
             song = ref
             source = opened
             page = 0
-            topRowIndex = 0
+            topSourceLine = 0
+
+            // A chart arrives laid out for a default screen, and opening a song
+            // does not change the screen - so nothing else is going to tell this
+            // one how big it is. Hand it the measurements already taken, or the
+            // second song of a set list is wrapped and paginated for a phantom
+            // viewport. Before publishing the rows, so the ones published are
+            // the ones the screen will show.
+            (opened as? ChartPageSource)?.relayout(linesPerPage, columns, wrapLines, 0)
             syncChart()
 
             // Which key to open in, most specific first: what the set list says
@@ -284,7 +382,7 @@ class ViewerController(
                 openAtLastPage = false
                 val last = (opened.pageCount - 1).coerceAtLeast(0)
                 page = if (mode == PageMode.SPREAD) last - (last % 2) else last
-                (opened as? ChartPageSource)?.let { topRowIndex = it.firstRowIndexOf(page) }
+                (opened as? ChartPageSource)?.let { topSourceLine = it.sourceLineOf(page) }
             }
 
             loading = false
@@ -292,17 +390,39 @@ class ViewerController(
         }
     }
 
-    /** Called when the viewport changes size, including on rotation. */
-    fun onViewportChanged(widthDp: Int, heightDp: Int, linesThatFit: Int, override: PageMode?) {
+    /**
+     * Called when the shape of the viewport changes: a rotation, a fold, a split
+     * screen, a zoom, or the wrap setting being turned over.
+     *
+     * All of those come down to the same two numbers - how many characters fit
+     * across and how many lines fit down - which is why they are one entry point
+     * rather than four.
+     */
+    fun onViewportChanged(
+        widthDp: Int,
+        heightDp: Int,
+        linesThatFit: Int,
+        columnsThatFit: Int,
+        wrapLines: Boolean,
+        override: PageMode?,
+    ) {
         mode = PageLayoutRules.modeFor(widthDp, heightDp, override)
         val chart = chartSource ?: return
-        if (linesThatFit == linesPerPage) return
+        if (
+            linesThatFit == linesPerPage &&
+            columnsThatFit == columns &&
+            wrapLines == this.wrapLines
+        ) {
+            return
+        }
         linesPerPage = linesThatFit
+        columns = columnsThatFit
+        this.wrapLines = wrapLines
         // Reflow, then land on whichever page now holds the line they were on.
         // Restoring "page 3" instead would move a reader by an arbitrary amount
         // every time the phone was rotated.
-        page = chart.relayout(linesThatFit, topRowIndex)
-        topRowIndex = chart.firstRowIndexOf(page)
+        page = chart.relayout(linesThatFit, columnsThatFit, wrapLines, topSourceLine)
+        topSourceLine = chart.sourceLineOf(page)
         syncChart()
     }
 
@@ -318,7 +438,7 @@ class ViewerController(
         val settled = if (mode == PageMode.SPREAD) clamped - (clamped % 2) else clamped
         if (settled == page) return
         page = settled
-        chartSource?.let { topRowIndex = it.firstRowIndexOf(settled) }
+        chartSource?.let { topSourceLine = it.sourceLineOf(settled) }
         positionReporter?.invoke(settled, userInitiated)
     }
 
@@ -411,8 +531,8 @@ class ViewerController(
             capo = capo,
             includeTab = false,
         )
-        page = chart.apply(request, linesPerPage, topRowIndex)
-        topRowIndex = chart.firstRowIndexOf(page)
+        page = chart.apply(request, topSourceLine)
+        topSourceLine = chart.sourceLineOf(page)
         transposeNotes = chart.current.notes
         analysis = ChartAnalyzer.analyze(chart.current.song)
         syncChart()
