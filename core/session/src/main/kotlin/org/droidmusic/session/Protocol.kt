@@ -186,6 +186,16 @@ data class ChartOffer(
     val displayName: String,
     val kind: FileKind,
     val sizeBytes: Long,
+    /**
+     * What a person needs to recognise the chart in a list of four hundred.
+     *
+     * Added for the aggregated library, where the same shape describes a chart
+     * nobody has asked for yet - so a row has to be readable on its own rather
+     * than being the answer to a question about a known song. Both default to
+     * absent, so a build that never sent them still decodes.
+     */
+    val artist: String? = null,
+    val keyText: String? = null,
 )
 
 /**
@@ -220,6 +230,68 @@ data class ChartFetchHeader(
     val reason: String? = null,
 )
 
+/**
+ * A device telling the session what it has.
+ *
+ * Sent by a follower after `welcome`, and again whenever its library changes.
+ * Paged, with [final] on the last one: a library of two thousand charts is a
+ * third of a megabyte of JSON, and putting that on the control socket as one
+ * line would sit in front of every page turn behind it - on exactly the network
+ * where that hurts.
+ *
+ * [filePort] is where this device will serve those charts from. Zero means it
+ * cannot serve, and its charts are then listed for the band to see without being
+ * offered for fetching - which is honest, and better than a row that fails when
+ * tapped.
+ *
+ * Deliberately not the address: a phone knows its port and cannot reliably say
+ * which of its addresses another device should use. The leader fills that in
+ * from the socket the follower actually arrived on.
+ */
+@Serializable
+@SerialName("catalogue")
+data class CataloguePublish(
+    override val seq: Long,
+    val deviceId: String,
+    val deviceName: String,
+    val filePort: Int = 0,
+    val charts: List<ChartOffer> = emptyList(),
+    val final: Boolean = true,
+) : Message
+
+/**
+ * The leader passing one device's catalogue on to everybody.
+ *
+ * One message per device per page rather than one aggregate: a device that
+ * changes its library should cost one device's worth of traffic, not the whole
+ * band's, and a receiver that accumulates per device can replace one without
+ * disturbing the rest.
+ *
+ * The leader's own catalogue travels this way too, with an empty host, which the
+ * receiver reads as "the leader you are already talking to".
+ */
+@Serializable
+@SerialName("cataloguepeer")
+data class CataloguePeer(
+    override val seq: Long,
+    val device: CatalogueDevice,
+    val final: Boolean = true,
+) : Message
+
+/**
+ * A device has left, so its charts are no longer on offer.
+ *
+ * Sent rather than inferred, because the alternative is every follower deciding
+ * for itself when a peer has gone and a list that quietly keeps offering charts
+ * from a phone that is in somebody's pocket in the car park.
+ */
+@Serializable
+@SerialName("cataloguegone")
+data class CatalogueGone(
+    override val seq: Long,
+    val deviceId: String,
+) : Message
+
 /** The leader closing the session cleanly, as opposed to vanishing. */
 @Serializable
 @SerialName("bye")
@@ -234,8 +306,11 @@ data class Goodbye(override val seq: Long, val reason: String? = null) : Message
  * cost of that is far higher than the cost of a follower quietly not offering to
  * fetch charts or not answering a readiness check. Every addition is built so
  * that it degrades instead: an unknown message (`check`, `report`, `wanted`,
- * `offered`) decodes to null and is ignored, and the new [Welcome.filePort]
- * reads as zero on a build that never sent it. A device that cannot answer a
+ * `offered`, `catalogue`, `cataloguepeer`, `cataloguegone`) decodes to null and
+ * is ignored, and the new [Welcome.filePort] reads as zero on a build that
+ * never sent it. A build that does not publish a catalogue simply does not
+ * appear in the aggregated library, and one that does not understand the
+ * aggregate carries on with the set-list flow it already had. A device that cannot answer a
  * check is shown on the leader's screen as not having answered, never as ready.
  */
 const val PROTOCOL_VERSION = 1

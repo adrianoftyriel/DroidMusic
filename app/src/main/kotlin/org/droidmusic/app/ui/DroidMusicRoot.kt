@@ -501,12 +501,29 @@ fun DroidMusicRoot(
                         }
                     }
 
-                    Screen.Backstage -> BackstageScreen(
+                    Screen.Backstage -> {
+                        val bandLibrary by sessionCoordinator.aggregate.collectAsState()
+                        val peerFetches by sessionCoordinator.peerFetches.collectAsState()
+                        val backstageIndex by app.library.index.collectAsState()
+                        BackstageScreen(
                         controller = backstageController,
                         role = sessionRole,
                         sessionLabel = sessionLabel,
                         reports = leaderState?.reports.orEmpty(),
                         followers = leaderState?.followers.orEmpty(),
+                        aggregate = bandLibrary,
+                        library = backstageIndex,
+                        peerFetches = peerFetches,
+                        onOpenChart = { songId ->
+                            viewerController.open(
+                                songId,
+                                null,
+                                -1,
+                                settings.viewer.unicodeAccidentals,
+                            )
+                            navigator.go(Screen.Viewer(songId))
+                        },
+                        onFetchChart = { chart -> sessionCoordinator.fetchFromBand(chart) },
                         onStart = {
                             backstageController.setlist?.let { startSetlist(it, 0) }
                         },
@@ -524,7 +541,8 @@ fun DroidMusicRoot(
                             navigator.go(Screen.Session)
                         },
                         onBack = { navigator.back() },
-                    )
+                        )
+                    }
 
                     Screen.Session -> {
                         val sessionBook by setlistController.book.collectAsState()

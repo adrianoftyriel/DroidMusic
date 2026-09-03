@@ -346,6 +346,29 @@ leading "the". Two people rarely have byte-identical copies of the same chart:
 one has a scan, the other a ChordPro. Anything genuinely missing is named rather
 than silently dropped.
 
+### The band's library, in one list
+
+**In an ad hoc session, Backstage shows every chart the band has between them**
+— searchable, with who holds each one against it. Tap a chart you have and it
+opens; tap one you have not and it comes across from whoever does, which is not
+necessarily the leader. A chart only the bass player has is fetched from the
+bass player.
+
+Every device publishes what it holds when it joins and again whenever its
+library changes, so the list fills in as the band arrives and a chart imported
+during a soundcheck appears on everybody's without anyone rejoining.
+
+Two people who have transcribed the same song differently show up as two rows.
+That is deliberate: they are different files, and collapsing them by title would
+hide that one copy has a different repeat — exactly the surprise the Backstage
+check exists to prevent.
+
+**What this exposes, plainly.** Everyone who joins sees everyone's chart titles,
+and on a venue network anybody can join. The files were already reachable by
+anybody who could learn a content hash, so what is new is the enumeration and
+the fact that every device now listens rather than only the leader. If the room
+is not one you would read your set list aloud in, do not start a session in it.
+
 ### Backstage
 
 **Starting a set goes backstage first.** Every chart in the running order is

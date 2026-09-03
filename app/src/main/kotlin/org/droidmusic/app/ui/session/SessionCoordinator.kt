@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.droidmusic.app.diag.Area
+import org.droidmusic.app.diag.Diagnostics
 import org.droidmusic.app.data.LibraryRepository
 import org.droidmusic.app.data.SettingsRepository
 import org.droidmusic.app.net.ChartFetcher
@@ -20,6 +22,8 @@ import org.droidmusic.session.ChartOffer
 import org.droidmusic.session.ChartSharing
 import org.droidmusic.session.ChartShare
 import org.droidmusic.session.ChartTransfer
+import org.droidmusic.session.AggregatedChart
+import org.droidmusic.session.Catalogue
 import org.droidmusic.session.ChartWant
 import org.droidmusic.session.FollowMode
 import org.droidmusic.session.FollowerState
@@ -29,6 +33,28 @@ import org.droidmusic.session.Position
 
 /** What this device is doing in a session, if anything. */
 enum class SessionRole { NONE, LEADER, FOLLOWER }
+
+/**
+ * One chart being pulled from another device in the band.
+ *
+ * Separate from [org.droidmusic.session.ChartTransfer], which describes the
+ * set-list flow where the leader offers and the player accepts a batch. This is
+ * one chart, asked for by name off the aggregated library, from whichever device
+ * has it.
+ */
+data class PeerFetch(
+    val chart: AggregatedChart,
+    val from: String = "",
+    val receivedBytes: Long = 0,
+    val done: Boolean = false,
+    val failed: String? = null,
+) {
+    val inFlight: Boolean get() = !done && failed == null
+
+    val fraction: Float
+        get() = if (chart.sizeBytes <= 0) 0f
+        else (receivedBytes.toFloat() / chart.sizeBytes).coerceIn(0f, 1f)
+}
 
 /**
  * The single place the rest of the app asks about band-leader mode.
@@ -83,6 +109,31 @@ class SessionCoordinator(
     private val fetcher by lazy { ChartFetcher(context, library) }
 
     /**
+     * This device's own chart server, in either role.
+     *
+     * A follower runs one too now, because the aggregated library is only worth
+     * looking at if a chart nobody but the bass player has can actually be
+     * pulled from the bass player. Otherwise the list is a catalogue of things
+     * the band cannot get.
+     */
+    private var ownChartServer: ChartServer? = null
+
+    private val _aggregate = MutableStateFlow<List<AggregatedChart>>(emptyList())
+
+    /**
+     * Every chart the band has between them, with who holds each one.
+     *
+     * Sourced differently by role and deliberately the same flow: the leader
+     * hears from everybody and merges, a follower is told the merge. Backstage
+     * does not have to know which it is looking at.
+     */
+    val aggregate: StateFlow<List<AggregatedChart>> = _aggregate.asStateFlow()
+
+    /** Charts arriving from a peer, keyed by content hash, for a progress row. */
+    private val _peerFetches = MutableStateFlow<Map<String, PeerFetch>>(emptyMap())
+    val peerFetches: StateFlow<Map<String, PeerFetch>> = _peerFetches.asStateFlow()
+
+    /**
      * A set list the leader has asked everyone to check, waiting to be checked.
      *
      * The set list travels with the request, so what gets checked is the
@@ -98,13 +149,15 @@ class SessionCoordinator(
         stop()
         val current = settings.settings.value
         val leaderName = current.deviceName.ifEmpty { "Leader" }
+        val charts = ChartServer(scope, context, library)
+        ownChartServer = charts
         val newServer = SessionServer(
             scope = scope,
             sessionName = sessionName,
             leaderName = leaderName,
             discovery = discovery,
             library = library,
-            chartServer = ChartServer(scope, context, library),
+            chartServer = charts,
             context = context,
         )
         server = newServer
@@ -112,11 +165,24 @@ class SessionCoordinator(
         _sessionLabel.value = sessionName
 
         scope.launch { newServer.state.collect { _leaderState.value = it } }
+        scope.launch { newServer.aggregate.collect { _aggregate.value = it } }
         runCatching { newServer.start() }
             .onFailure {
                 _message.value = "Could not open a session on this network."
                 stop()
             }
+
+        // Its own library goes into the union like anybody else's, and again
+        // whenever it changes - a chart imported during a soundcheck should
+        // appear on everybody's list without anyone rejoining.
+        scope.launch {
+            library.index.collect {
+                newServer.announceOwnCatalogue(
+                    deviceId = current.deviceId,
+                    deviceName = leaderName,
+                )
+            }
+        }
     }
 
     fun joinAsFollower(session: DiscoveredSession) {
@@ -135,6 +201,37 @@ class SessionCoordinator(
         client = newClient
         _role.value = SessionRole.FOLLOWER
         _sessionLabel.value = session.serviceName
+
+        // This device serves its own charts too, so a song only it has can be
+        // pulled by the rest of the band. Started before the catalogue is
+        // published, because the port is part of what is published; if it will
+        // not bind, the catalogue goes out with port zero and this device is
+        // listed as having charts it cannot send, which is the honest answer.
+        val charts = ChartServer(scope, context, library)
+        ownChartServer = charts
+        scope.launch {
+            val port = runCatching { charts.start() }.getOrDefault(0)
+            if (port == 0) {
+                Diagnostics.log(
+                    Area.FOLLOWER,
+                    "could not open a chart port; this device will not be able to send charts",
+                )
+            }
+            newClient.chartPort = port
+            newClient.catalogue = ChartShare.catalogueOf(library.index.value)
+            newClient.publishCatalogue()
+        }
+
+        scope.launch { newClient.aggregate.collect { _aggregate.value = it } }
+
+        // Re-announced when this device's library changes, so a chart imported
+        // mid-soundcheck is on offer to the band without rejoining.
+        scope.launch {
+            library.index.collect { index ->
+                newClient.catalogue = ChartShare.catalogueOf(index)
+                newClient.publishCatalogue()
+            }
+        }
 
         scope.launch { newClient.state.collect { _followerState.value = it } }
         scope.launch { newClient.lastError.collect { _message.value = it } }
@@ -362,6 +459,68 @@ class SessionCoordinator(
         }
     }
 
+    /**
+     * Fetches one chart from whoever in the band has it.
+     *
+     * Not the leader by default: the point of the aggregated library is that a
+     * chart only the bass player has comes from the bass player. A blank host
+     * means the leader, which is the one device whose address this one already
+     * knows.
+     *
+     * Asking twice for the same chart is a no-op, because a list that
+     * recomposes is not a second request.
+     */
+    fun fetchFromBand(chart: AggregatedChart) {
+        if (_peerFetches.value[chart.contentHash]?.let { it.done || it.inFlight } == true) return
+
+        val me = settings.settings.value.deviceId
+        val owner = Catalogue.sourceFor(chart, me)
+        if (owner == null || owner.deviceId == me) return
+
+        val host = owner.host.ifBlank { client?.chartSource?.value?.host.orEmpty() }
+        if (host.isBlank()) {
+            setPeerFetch(chart, PeerFetch(chart, failed = "No address for ${owner.deviceName}."))
+            return
+        }
+
+        setPeerFetch(chart, PeerFetch(chart, from = owner.deviceName))
+
+        scope.launch {
+            val offer = ChartOffer(
+                contentHash = chart.contentHash,
+                title = chart.title,
+                displayName = chart.displayName,
+                kind = org.droidmusic.library.SongRef.kindOf(chart.displayName),
+                sizeBytes = chart.sizeBytes,
+                artist = chart.artist,
+                keyText = chart.keyText,
+            )
+            val outcome = fetcher.fetch(host, owner.filePort, offer) { received ->
+                _peerFetches.value = _peerFetches.value.toMutableMap().apply {
+                    this[chart.contentHash]?.let { this[chart.contentHash] = it.copy(receivedBytes = received) }
+                }
+            }
+            when (outcome) {
+                is ChartFetcher.Outcome.Installed -> {
+                    Diagnostics.log(
+                        Area.FOLLOWER,
+                        "fetched \"${chart.title}\" from ${owner.deviceName}",
+                    )
+                    setPeerFetch(chart, PeerFetch(chart, from = owner.deviceName, done = true))
+                }
+
+                is ChartFetcher.Outcome.Failed -> setPeerFetch(
+                    chart,
+                    PeerFetch(chart, from = owner.deviceName, failed = outcome.reason),
+                )
+            }
+        }
+    }
+
+    private fun setPeerFetch(chart: AggregatedChart, state: PeerFetch) {
+        _peerFetches.value = _peerFetches.value + (chart.contentHash to state)
+    }
+
     private fun updateTransfer(hash: String, change: (ChartTransfer) -> ChartTransfer) {
         _sharing.value = _sharing.value.copy(
             transfers = _sharing.value.transfers.map {
@@ -380,6 +539,10 @@ class SessionCoordinator(
 
     fun stop() {
         _sharing.value = ChartSharing()
+        _aggregate.value = emptyList()
+        _peerFetches.value = emptyMap()
+        ownChartServer?.stop()
+        ownChartServer = null
         server?.stop()
         server = null
         client?.leave()

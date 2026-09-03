@@ -30,6 +30,13 @@ import org.droidmusic.session.Message
 import org.droidmusic.session.Ping
 import org.droidmusic.session.Pong
 import org.droidmusic.session.Position
+import org.droidmusic.session.AggregatedChart
+import org.droidmusic.session.Catalogue
+import org.droidmusic.session.CatalogueDevice
+import org.droidmusic.session.CatalogueGone
+import org.droidmusic.session.CataloguePeer
+import org.droidmusic.session.CataloguePublish
+import org.droidmusic.session.ChartOffer
 import org.droidmusic.session.ChartWant
 import org.droidmusic.session.ChartsOffered
 import org.droidmusic.session.ChartsWanted
@@ -106,6 +113,32 @@ class SessionClient(
      */
     private val _chartSource = MutableStateFlow<ChartSource?>(null)
     val chartSource: StateFlow<ChartSource?> = _chartSource.asStateFlow()
+
+    /**
+     * What every device in the session has, as the leader relays it.
+     *
+     * Accumulated per device rather than replaced wholesale: one device
+     * changing its library should not blank the others while its pages arrive.
+     */
+    private val peers = java.util.concurrent.ConcurrentHashMap<String, CatalogueDevice>()
+    private val peerPages = java.util.concurrent.ConcurrentHashMap<String, MutableList<ChartOffer>>()
+
+    private val _aggregate = MutableStateFlow<List<AggregatedChart>>(emptyList())
+
+    /** The band's charts as one library. */
+    val aggregate: StateFlow<List<AggregatedChart>> = _aggregate.asStateFlow()
+
+    /**
+     * What this device will tell the session it has, and where from.
+     *
+     * Set by the coordinator, which owns the library and the chart server. Held
+     * rather than passed so a reconnect re-announces without being asked again.
+     */
+    @Volatile
+    var catalogue: List<ChartOffer> = emptyList()
+
+    @Volatile
+    var chartPort: Int = 0
 
     private val _checkRequests = MutableSharedFlow<CheckRequest>(extraBufferCapacity = 8)
     val checkRequests: SharedFlow<CheckRequest> = _checkRequests.asSharedFlow()
@@ -244,6 +277,10 @@ class SessionClient(
                                 (if (message.filePort > 0) ", charts on ${message.filePort}" else ""),
                         )
                         dispatch(FollowerEvent.Connected(message.sessionName), ::send)
+                        // What this device brings. Announced on every connect,
+                        // including a reconnect, because the leader forgets a
+                        // device's catalogue when it drops.
+                        publishCatalogue(::send)
                     }
 
                     is Position -> {
@@ -265,6 +302,14 @@ class SessionClient(
                     }
 
                     is ChartsOffered -> _chartOffers.tryEmit(message)
+
+                    is CataloguePeer -> onPeerCatalogue(message)
+
+                    is CatalogueGone -> {
+                        peers.remove(message.deviceId)
+                        peerPages.remove(message.deviceId)
+                        republishAggregate()
+                    }
 
                     is CheckRequest -> _checkRequests.tryEmit(message)
 
@@ -319,6 +364,9 @@ class SessionClient(
     fun rejoin() = dispatch(FollowerEvent.RejoinRequested)
 
     fun leave() {
+        peers.clear()
+        peerPages.clear()
+        _aggregate.value = emptyList()
         dispatch(FollowerEvent.LeaveRequested)
         job?.cancel()
         job = null
@@ -359,6 +407,56 @@ class SessionClient(
         sendOnCurrentSocket(ChartsWanted(nextSeq(), deviceId, wanted))
     }
 
+    private fun onPeerCatalogue(message: CataloguePeer) {
+        val id = message.device.deviceId
+        val pages = peerPages.getOrPut(id) { mutableListOf() }
+        synchronized(pages) { pages += message.device.charts }
+        if (!message.final) return
+
+        val charts = synchronized(pages) { pages.toList().also { pages.clear() } }
+        peerPages.remove(id)
+        peers[id] = message.device.copy(
+            charts = charts,
+            // A blank host is the leader saying "me": it cannot know which of
+            // its addresses this device reached it on, and the one already in
+            // use demonstrably works.
+            host = message.device.host.ifBlank { target?.host.orEmpty() },
+        )
+        republishAggregate()
+    }
+
+    private fun republishAggregate() {
+        _aggregate.value = Catalogue.merge(peers.values.toList())
+    }
+
+    /**
+     * Tells the session what this device has, in pages.
+     *
+     * Paged for the same reason the leader's relay is: the control socket
+     * carries page turns, and a library of two thousand charts on one line
+     * would sit in front of the next one.
+     */
+    fun publishCatalogue(send: ((Message) -> Unit)? = null) {
+        val charts = catalogue
+        val pages = charts.chunked(CATALOGUE_PAGE_SIZE).ifEmpty { listOf(emptyList()) }
+        for ((index, page) in pages.withIndex()) {
+            val message = CataloguePublish(
+                seq = nextSeq(),
+                deviceId = deviceId,
+                deviceName = deviceName,
+                filePort = chartPort,
+                charts = page,
+                final = index == pages.lastIndex,
+            )
+            if (send != null) send(message) else sendOnCurrentSocket(message)
+        }
+        Diagnostics.log(
+            Area.FOLLOWER,
+            "published ${charts.size} charts" +
+                (if (chartPort > 0) " on port $chartPort" else ", cannot serve"),
+        )
+    }
+
     private fun sendOnCurrentSocket(message: Message) {
         val current = socket ?: return
         scope.launch(Dispatchers.IO) { sendOn(current, message) }
@@ -395,5 +493,8 @@ class SessionClient(
         const val READ_TIMEOUT_MS = 30_000
         const val INITIAL_BACKOFF_MS = 1_000L
         const val MAX_BACKOFF_MS = 20_000L
+
+        /** Charts per catalogue message; see SessionServer for the reasoning. */
+        const val CATALOGUE_PAGE_SIZE = 150
     }
 }

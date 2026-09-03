@@ -34,7 +34,13 @@ import org.droidmusic.app.ui.common.Header
 import org.droidmusic.app.ui.common.Pill
 import org.droidmusic.app.ui.common.SectionLabel
 import org.droidmusic.app.ui.session.SessionRole
+import org.droidmusic.app.ui.session.PeerFetch
+import org.droidmusic.library.LibraryIndex
+import org.droidmusic.session.AggregatedChart
 import org.droidmusic.session.Backstage
+import org.droidmusic.app.ui.session.PeerFetch
+import org.droidmusic.library.LibraryIndex
+import org.droidmusic.session.AggregatedChart
 import org.droidmusic.session.BackstageReport
 import org.droidmusic.session.ChartState
 import org.droidmusic.session.Follower
@@ -60,8 +66,13 @@ fun BackstageScreen(
     sessionLabel: String?,
     reports: List<BackstageReport>,
     followers: List<Follower>,
+    aggregate: List<AggregatedChart>,
+    library: LibraryIndex,
+    peerFetches: Map<String, PeerFetch>,
     onStart: () -> Unit,
     onOpenSong: (Int) -> Unit,
+    onOpenChart: (String) -> Unit,
+    onFetchChart: (AggregatedChart) -> Unit,
     onAskForMissing: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -77,30 +88,44 @@ fun BackstageScreen(
                 subtitle = sessionLabel,
                 onBack = onBack,
             )
-            when (role) {
-                SessionRole.FOLLOWER -> EmptyState(
-                    title = "Waiting for the running order",
-                    body = "You are in ${sessionLabel ?: "the session"}. When the leader " +
-                        "starts a set, it appears here and this device checks it can open " +
-                        "every chart in it - before the first song rather than during it.\n\n" +
-                        "Nothing else is needed from you. Leave this screen if you like; it " +
-                        "comes back on its own when the leader asks.",
+            // In a session with no running order, the useful thing is not an
+            // apology - it is what the band has between them. That is the whole
+            // of an ad hoc session: no plan, so the question is what is
+            // possible rather than what is next, and the answer is a list only
+            // this screen can assemble.
+            if (role != SessionRole.NONE) {
+                Text(
+                    when (role) {
+                        SessionRole.LEADER ->
+                            "No running order: open a chart and the band follows you to it. " +
+                                "Everything anybody has is below."
+                        else ->
+                            "Waiting on the leader to start a set. Meanwhile, everything the " +
+                                "band has between them is below."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
-
-                SessionRole.LEADER -> EmptyState(
-                    title = "No running order",
-                    body = "This session is sharing as it goes: open a chart and the band " +
-                        "follows you to it.\n\nTo check everyone can open a whole set before " +
-                        "you start, open a set list and start it from there. That is what " +
-                        "fills this screen.",
+                BandLibrary(
+                    aggregate = aggregate,
+                    library = library,
+                    fetches = peerFetches,
+                    onOpen = onOpenChart,
+                    onFetch = onFetchChart,
                 )
-
-                SessionRole.NONE -> EmptyState(
-                    title = "Nothing to check",
-                    body = "Open a set list and start it, and this screen will make sure " +
-                        "every chart in it opens before the first song.",
-                )
+                return@Column
             }
+
+            // Only reachable outside a session, now that being in one shows
+            // the band's library above. Somebody here has opened Backstage from
+            // a menu with no session running and nothing started.
+            EmptyState(
+                title = "Nothing to check",
+                body = "Open a set list and start it, and this screen will make sure every " +
+                    "chart in it opens before the first song. In a session it also lists " +
+                    "everything the band has between them.",
+            )
         }
         return
     }

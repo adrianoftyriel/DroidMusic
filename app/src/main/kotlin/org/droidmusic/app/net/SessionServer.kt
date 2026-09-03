@@ -26,6 +26,13 @@ import org.droidmusic.session.ChartShare
 import org.droidmusic.session.ChartsOffered
 import org.droidmusic.session.ChartsWanted
 import org.droidmusic.session.CheckReport
+import org.droidmusic.session.AggregatedChart
+import org.droidmusic.session.Catalogue
+import org.droidmusic.session.CatalogueDevice
+import org.droidmusic.session.CatalogueGone
+import org.droidmusic.session.CataloguePeer
+import org.droidmusic.session.CataloguePublish
+import org.droidmusic.session.ChartOffer
 import org.droidmusic.session.CheckRequest
 import org.droidmusic.session.Goodbye
 import org.droidmusic.session.Hello
@@ -85,6 +92,23 @@ class SessionServer(
      * had to remember to push the running order again for them - which is to
      * say, it did not happen.
      */
+    /**
+     * What every device in the session says it has, keyed by device id.
+     *
+     * The leader is the only device that hears from everybody, so it is the
+     * only one that can build the union - and it publishes that union rather
+     * than each device working it out, so all of them agree on one list.
+     */
+    private val catalogues = ConcurrentHashMap<String, CatalogueDevice>()
+
+    /** Catalogue pages still arriving, per device, until the final one lands. */
+    private val cataloguePages = ConcurrentHashMap<String, MutableList<ChartOffer>>()
+
+    private val _aggregate = MutableStateFlow<List<AggregatedChart>>(emptyList())
+
+    /** The band's charts as one library, for this device's own screens. */
+    val aggregate: StateFlow<List<AggregatedChart>> = _aggregate.asStateFlow()
+
     @Volatile
     private var running: Setlist? = null
 
@@ -193,6 +217,7 @@ class SessionServer(
                 when (val message = Wire.decode(line)) {
                     is Hello -> onHello(message, connection)
                     is ChartsWanted -> onWanted(message, connection)
+                    is CataloguePublish -> onCatalogue(message, connection)
                     is FollowerStatus -> {
                         _state.value = LeaderSession.withStatus(
                             _state.value,
@@ -229,10 +254,118 @@ class SessionServer(
                 if (connections.remove(id, connection)) {
                     _state.value = LeaderSession.withoutFollower(_state.value, id)
                     Diagnostics.log(Area.LEADER, "${Diagnostics.short(id)} disconnected")
+                    // Its charts leave with it. A list that goes on offering a
+                    // chart from a phone in somebody's pocket in the car park
+                    // is worse than a shorter list.
+                    if (catalogues.remove(id) != null) {
+                        publishCatalogue()
+                        val (next, seq) = LeaderSession.nextSeq(_state.value)
+                        _state.value = next
+                        broadcast(CatalogueGone(seq, id))
+                    }
                 }
             }
             runCatching { client.close() }
         }
+    }
+
+    /**
+     * A follower has said what it has.
+     *
+     * Accumulated per device until the page marked final, then merged and
+     * passed on. Sent to everybody rather than only to the asker, because the
+     * whole point is that all devices see the same library.
+     */
+    private fun onCatalogue(message: CataloguePublish, connection: Connection) {
+        val pages = cataloguePages.getOrPut(message.deviceId) { mutableListOf() }
+        synchronized(pages) { pages += message.charts }
+        if (!message.final) return
+
+        val charts = synchronized(pages) { pages.toList().also { pages.clear() } }
+        cataloguePages.remove(message.deviceId)
+
+        val device = CatalogueDevice(
+            deviceId = message.deviceId,
+            deviceName = message.deviceName,
+            // From the socket, not from the follower. A phone cannot reliably
+            // say which of its addresses another device should use, and the one
+            // it arrived on demonstrably works.
+            host = connection.socket.inetAddress?.hostAddress.orEmpty(),
+            filePort = message.filePort,
+            charts = charts,
+        )
+        catalogues[message.deviceId] = device
+        Diagnostics.log(
+            Area.LEADER,
+            "catalogue from ${message.deviceName}: ${charts.size} charts" +
+                (if (message.filePort > 0) " on ${device.host}:${message.filePort}" else ", cannot serve"),
+        )
+
+        publishCatalogue()
+        relay(device)
+    }
+
+    /**
+     * Puts this leader's own library into the union and tells the band.
+     *
+     * Called when the leader's library changes as well as when a follower
+     * announces, because a chart imported mid-soundcheck should appear on
+     * everybody's list without anybody rejoining.
+     */
+    fun announceOwnCatalogue(deviceId: String, deviceName: String) {
+        val index = library?.index?.value ?: return
+        val device = CatalogueDevice(
+            deviceId = deviceId,
+            deviceName = deviceName,
+            // Empty: the leader cannot know which of its addresses a given
+            // follower reached it on, and every follower already holds one that
+            // works. They read a blank host as "the leader you are talking to".
+            host = "",
+            filePort = chartServer?.port?.value ?: 0,
+            charts = ChartShare.catalogueOf(index),
+        )
+        catalogues[deviceId] = device
+        publishCatalogue()
+        relay(device)
+    }
+
+    /** Sends one device's catalogue on, in pages small enough not to block a turn. */
+    private fun relay(device: CatalogueDevice) {
+        val pages = device.charts.chunked(CATALOGUE_PAGE_SIZE).ifEmpty { listOf(emptyList()) }
+        for ((index, page) in pages.withIndex()) {
+            val (next, seq) = LeaderSession.nextSeq(_state.value)
+            _state.value = next
+            broadcast(
+                CataloguePeer(
+                    seq = seq,
+                    device = device.copy(charts = page),
+                    final = index == pages.lastIndex,
+                ),
+            )
+        }
+    }
+
+    /** Replays every known catalogue to one connection, for a device that just joined. */
+    private fun sendCatalogues(connection: Connection) {
+        for (device in catalogues.values) {
+            val pages = device.charts.chunked(CATALOGUE_PAGE_SIZE).ifEmpty { listOf(emptyList()) }
+            for ((index, page) in pages.withIndex()) {
+                val (next, seq) = LeaderSession.nextSeq(_state.value)
+                _state.value = next
+                send(
+                    connection,
+                    CataloguePeer(
+                        seq = seq,
+                        device = device.copy(charts = page),
+                        final = index == pages.lastIndex,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun publishCatalogue() {
+        _aggregate.value = Catalogue.merge(catalogues.values.toList())
     }
 
     /** A socket failure in a few words, for the log. */
@@ -319,6 +452,10 @@ class SessionServer(
                 filePort = chartServer?.port?.value ?: 0,
             ),
         )
+        // Everything the band already has, so the aggregated library is not
+        // empty for the first few seconds of being in the session.
+        sendCatalogues(connection)
+
         // Catch the newcomer up: the running order first, so the check that
         // follows has something to be about, and the position last so they land
         // on the song the band is actually on.
@@ -506,5 +643,15 @@ class SessionServer(
 
         /** Long enough for a queued goodbye to reach the wire, short enough to be over. */
         const val GOODBYE_GRACE_MS = 250L
+
+        /**
+         * Charts per catalogue message.
+         *
+         * A page of 150 is a line of a few tens of kilobytes, which the control
+         * socket carries without a page turn queueing behind it. A library of
+         * two thousand charts is then fourteen messages rather than one third
+         * of a megabyte.
+         */
+        const val CATALOGUE_PAGE_SIZE = 150
     }
 }

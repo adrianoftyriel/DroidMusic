@@ -88,10 +88,40 @@ object ChartShare {
                 displayName = song.displayName,
                 kind = song.kind,
                 sizeBytes = song.sizeBytes,
+                artist = song.artist,
+                keyText = song.soundingKey?.toString(),
             )
         }
         return out
     }
+
+    /**
+     * A whole library as a catalogue, for the aggregated view.
+     *
+     * The same shape [offers] produces, built without anybody having asked for
+     * anything - which is the difference between the two: an offer answers a
+     * request, a catalogue is a standing statement of what this device has.
+     *
+     * A chart with no content hash is left out. The hash is how a chart is
+     * asked for and how the bytes are checked on arrival, so one without it
+     * could be listed and never fetched, and a row that fails when tapped is
+     * worse than a row that is not there.
+     */
+    fun catalogueOf(library: LibraryIndex): List<ChartOffer> =
+        library.visible
+            .filter { it.contentHash != null }
+            .distinctBy { it.contentHash }
+            .map { song ->
+                ChartOffer(
+                    contentHash = song.contentHash.orEmpty(),
+                    title = song.bestTitle,
+                    displayName = song.displayName,
+                    kind = song.kind,
+                    sizeBytes = song.sizeBytes,
+                    artist = song.artist,
+                    keyText = song.soundingKey?.toString(),
+                )
+            }
 
     /** An offer that was turned down, and something to tell the player. */
     data class Refusal(val offer: ChartOffer, val reason: String)

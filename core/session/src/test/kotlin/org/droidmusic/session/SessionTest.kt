@@ -30,6 +30,35 @@ class WireTest {
             Pong(seq = 6, sentAt = 123L, deviceId = "d1"),
             FollowerStatus(seq = 7, deviceId = "d1", deviceName = "n", following = true, page = 2),
             Goodbye(seq = 8, reason = "set finished"),
+            CataloguePublish(
+                seq = 9,
+                deviceId = "d1",
+                deviceName = "Jim's Pixel",
+                filePort = 41235,
+                charts = listOf(
+                    ChartOffer(
+                        contentHash = "h1",
+                        title = "Wichita Lineman",
+                        displayName = "Wichita Lineman.pdf",
+                        kind = org.droidmusic.library.FileKind.PDF,
+                        sizeBytes = 240_000,
+                        artist = "Jimmy Webb",
+                        keyText = "F",
+                    ),
+                ),
+                final = false,
+            ),
+            CataloguePeer(
+                seq = 10,
+                device = CatalogueDevice(
+                    deviceId = "d2",
+                    deviceName = "Bo",
+                    host = "192.168.1.42",
+                    filePort = 41236,
+                    charts = emptyList(),
+                ),
+            ),
+            CatalogueGone(seq = 11, deviceId = "d2"),
         )
         for (message in messages) {
             val decoded = Wire.decode(Wire.encode(message))

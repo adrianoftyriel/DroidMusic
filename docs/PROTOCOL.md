@@ -233,6 +233,72 @@ whatever it says.
 Drives the leader's view of who is in step, who has taken over, and who does not
 have the chart at all.
 
+### `catalogue` — a device saying what it has
+
+```json
+{"type":"catalogue","seq":5,"deviceId":"…","deviceName":"Bo","filePort":41235,"final":false,
+ "charts":[{"contentHash":"…","title":"Copperhead Road","displayName":"copperhead.cho",
+            "kind":"CHORDPRO","sizeBytes":4210,"artist":"Steve Earle","keyText":"D"}]}
+```
+
+Sent by a follower after `welcome`, and again whenever its library changes.
+Paged, `final` on the last: two thousand charts is a third of a megabyte, and on
+one line it would sit in front of every page turn behind it.
+
+`filePort` is where this device will serve those charts. **Zero means it cannot
+serve** — its charts are then listed for the band to see without being offered,
+which is honest and better than a row that fails when tapped.
+
+**No host, deliberately.** A phone knows its port and cannot reliably say which
+of its addresses another device should use; one holding wifi and mobile data at
+once has several and the useful one is not knowable from the inside. The leader
+fills that in from the socket the follower actually arrived on.
+
+### `cataloguepeer` — the leader passing one on
+
+```json
+{"type":"cataloguepeer","seq":6,"final":true,
+ "device":{"deviceId":"…","deviceName":"Bo","host":"192.168.1.42","filePort":41235,"charts":[…]}}
+```
+
+One device per message rather than one merged aggregate, so a device changing
+its library costs one device's worth of traffic and a receiver can replace that
+entry without disturbing the rest. Every device is relayed to every device,
+which is what makes all of them agree on one list.
+
+The leader's own catalogue travels this way too, with an **empty host** — read by
+each follower as "the leader you are already talking to", since the leader
+cannot know which of its addresses a given follower used and the follower
+already holds one that works.
+
+Replayed to a joining device before the running order, so the aggregated library
+is not empty for the first seconds of being in a session.
+
+### `cataloguegone` — a device has left
+
+```json
+{"type":"cataloguegone","seq":7,"deviceId":"…"}
+```
+
+Sent rather than inferred. The alternative is every follower deciding for itself
+when a peer has gone, and a list that keeps offering charts from a phone that is
+in somebody's pocket in the car park.
+
+### Fetching from a peer rather than the leader
+
+The file channel in the next section is unchanged; what changed is who runs one.
+Every device in a session now binds one, so a chart only the bass player has is
+fetched from the bass player. A fetch prefers any owner that is not this device
+— pulling a file from yourself is a round trip to nowhere — and then takes the
+first owner that can serve, so a chart comes from the same place on each attempt
+rather than a different one.
+
+**Where this fails and the set-list flow does not:** venue wifi with client
+isolation lets every device reach the leader and none of them reach each other.
+Follower-to-leader fetches still work there; follower-to-follower does not, and
+the failure surfaces as a fetch that times out against one peer. Nothing in the
+app can get round an access point that is doing this on purpose.
+
 ### `bye` — the leader closing cleanly
 
 ```json

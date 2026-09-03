@@ -1116,7 +1116,79 @@ one screen and makes the failure obvious at the moment it happens.
 
 ---
 
-## 17. Things deliberately not built
+## 17. The band's library, aggregated
+
+An ad hoc session used to share as it went: a chart reached the band when the
+leader opened it, and until then nobody could see what anybody had. At the gig
+where the next song is called from the stage, that makes "can we play X" a
+question answered by four people looking at four phones.
+
+So every device now publishes a catalogue of what it holds, the leader merges
+them, and all of them see the same list with who has each chart against it.
+
+**This was previously listed here as deliberately not built,** on the grounds
+that letting a follower enumerate the leader's library widened what an
+unauthenticated socket exposed. That reasoning was half right and it overvalued
+the wrong half. The leader's chart server already serves any indexed chart to
+anyone who asks for it by hash; what was missing was only the *enumeration*. So
+the exposure this adds is the titles, not the files - and the files were already
+reachable by anybody who could learn a hash, which a shared set list hands out.
+
+What it does genuinely change: every device now listens, not just the leader,
+and every device's titles are visible to everyone who joins. On a venue network
+anybody can join. That is a real widening, it is the band's call rather than the
+app's, and the honest mitigation is the one that was always true of this
+protocol - if the room is not one you would read your set list aloud in, do not
+start a session in it.
+
+### Why the leader merges rather than every device
+
+Only the leader hears from everybody. A follower is connected to the leader and
+to nobody else, so it cannot build the union itself, and having each device
+gossip to the others would need a mesh where there is currently a star.
+
+The leader therefore relays one device's catalogue at a time rather than one
+merged blob. A device changing its library then costs one device's worth of
+traffic instead of the whole band's, and a receiver can replace that device's
+entry without disturbing the rest.
+
+### Why a follower cannot say its own address
+
+A catalogue carries a port and no host. A phone knows which port it bound and
+cannot reliably say which of its addresses another device should use - one
+holding wifi and mobile data at once has several, and the useful one is not
+knowable from the inside. The leader fills in the host from the socket the
+follower actually arrived on, which demonstrably works.
+
+The leader's own entry carries a blank host, read by every follower as "the
+leader you are already talking to". It cannot know which of its addresses a
+given follower reached it on either, and each of them already holds one that
+works.
+
+### Two copies of one song stay two rows
+
+The union is keyed by content hash, not title, because the hash is what a fetch
+asks for and what the bytes are checked against on arrival. The consequence is
+that a song two people have transcribed differently appears twice.
+
+That is the right answer. Collapsing them by title would hide that the bass
+player's copy has a different repeat, which is exactly the class of surprise the
+Backstage check exists to prevent. What the merge does do is pick the
+best-described copy to name the row, so a device that scanned a folder with
+chart reading off does not contribute a row identified only by a filename when
+somebody else knows the artist and the key.
+
+### A device that cannot serve still counts as having it
+
+If the chart server will not bind, the catalogue goes out with port zero. Its
+charts are then listed and not offered: the row says who has it and that they
+cannot send it. A row that fails when tapped would be worse, and hiding the
+chart entirely would be worse still - "Bo has it, get it off him another way" is
+actionable, and silence is not.
+
+---
+
+## 18. Things deliberately not built
 
 - **Per-vendor cloud SDKs.** Section 4.
 - **Transposing PDFs.** A PDF is a picture of a page. The control is absent
@@ -1127,12 +1199,6 @@ one screen and makes the failure obvious at the moment it happens.
   useless for a fingerstyle arrangement.
 - **Automatic page turning by tempo.** Nobody plays to a click that reliably,
   and a chart that turns itself at the wrong moment is worse than no feature.
-- **Browsing the leader's whole library over a session.** An ad hoc session
-  shares as it goes: a chart reaches the band when the leader opens it. Letting
-  a follower enumerate and pull the leader's entire library would mean anybody
-  on an unauthenticated venue network could do the same, and the bounds in
-  section 8 exist precisely because that socket has no identity behind it. A
-  band that wants everything in advance runs the session from a set list.
 - **A cloud account or a sync server.** The band are in the same room. Set lists
   travel as files or over the local network, and nothing needs an account.
 - **Drag-and-drop set list reordering *instead of* buttons.** The drag is built
