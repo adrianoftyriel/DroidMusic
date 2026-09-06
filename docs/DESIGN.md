@@ -1203,6 +1203,28 @@ opened the app to ask, without a tap. Not a bottom bar and not a drawer: those
 are for moving between places you are already in, and the first question here is
 which place to be in at all.
 
+### Closing a chart is not going home
+
+Making the menu the root quietly broke the way out of the viewer, which emptied
+the back stack. That was the library when the library was the root; afterwards it
+was the front door, so a player who opened one song out of twenty landed two taps
+away from the running order they were working through.
+
+Closing a chart now returns to the screen it was opened from, which is the one
+directly underneath it on the stack — the library, a set list, the pre-set check.
+The system back gesture out of the viewer does the same thing, because it is the
+same act.
+
+The exception is worth stating, because it is the case that has no screen
+underneath: a chart the leader of a session pushes arrives by *replacing*
+whatever was on top, so a follower can end up with only the menu below the
+viewer. There, closing goes to where the chart belongs rather than to where the
+app starts — the set list the viewer is working through, or the library — and a
+set list gets the list of set lists put underneath it so that backing out of that
+goes somewhere sensible too. The rule is `closingViewer`, a function from stack
+to stack rather than a method poking at one, because navigation that lands one
+screen off is only ever noticed with an instrument in the other hand.
+
 ### One action set, two ways to reach it
 
 A press and hold offers what can be done to one item; bulk edit offers the same

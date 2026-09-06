@@ -101,6 +101,51 @@ class Navigator(initial: Screen) {
     fun backToRoot() {
         while (stack.size > 1) stack.removeAt(stack.size - 1)
     }
+
+    /** Closes the chart on top of the stack, per [closingViewer]. */
+    fun closeViewer() {
+        val next = closingViewer(stack.toList())
+        if (next == stack.toList()) return
+        stack.clear()
+        stack.addAll(next)
+    }
+}
+
+/**
+ * The back stack after closing the chart on top of [stack].
+ *
+ * **Closing a chart is not going home.** It used to be: the way out of the
+ * viewer emptied the stack, which put a player who had opened one song out of
+ * twenty back at the front door of the app, with the library or the running
+ * order they were working through two taps away. The screen a chart was opened
+ * from is the screen closing it should return to, and that screen is sitting
+ * directly underneath it on the stack.
+ *
+ * **Except when it is not.** A chart opened by the leader of a session arrives
+ * by replacing whatever was on top, so a follower can end up with nothing under
+ * the viewer but the menu. That is the case the fallback is for, and what it
+ * falls back to is where the chart belongs rather than where the app starts: the
+ * set list the viewer is working through, or the library. The set list gets the
+ * list of set lists put underneath it, so backing out of it goes somewhere
+ * sensible rather than straight to the menu.
+ *
+ * Written as a function over the stack, and not as a method poking at it, so the
+ * rule has a test - navigation that lands one screen off is the kind of thing
+ * that is only noticed at a rehearsal.
+ */
+fun closingViewer(stack: List<Screen>): List<Screen> {
+    val viewer = stack.lastOrNull() as? Screen.Viewer ?: return stack
+
+    // Several viewers can stack up when charts are opened from one another;
+    // closing the chart means leaving all of them, not peeling off one.
+    val remaining = stack.dropLastWhile { it is Screen.Viewer }
+    val opener = remaining.lastOrNull()
+    if (opener != null && opener != Screen.MainMenu) return remaining
+
+    return remaining + when (val setlistId = viewer.setlistId) {
+        null -> listOf(Screen.Library)
+        else -> listOf(Screen.Setlists, Screen.SetlistDetail(setlistId))
+    }
 }
 
 @Composable

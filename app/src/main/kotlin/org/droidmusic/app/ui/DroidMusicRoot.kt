@@ -316,7 +316,12 @@ fun DroidMusicRoot(
     // at is the same as starting one silently.
     LaunchedEffect(Unit) {
         sharedText.collect { shared ->
+            // To the library itself, not merely back to the root: the root has
+            // been the menu since the library stopped being the front door, and
+            // emptying the stack put the player on a screen that says nothing
+            // about the import running behind it.
             navigator.backToRoot()
+            navigator.go(Screen.Library)
             libraryController.importFromShare(shared)
         }
     }
@@ -333,7 +338,14 @@ fun DroidMusicRoot(
     }
 
     BackHandler(enabled = navigator.canGoBack || controlsVisible) {
-        if (controlsVisible) controlsVisible = false else navigator.back()
+        // The system back out of a chart is the same act as the menu's "close
+        // the chart", so it lands in the same place. Anywhere else it is a plain
+        // step back up the stack.
+        when {
+            controlsVisible -> controlsVisible = false
+            navigator.current is Screen.Viewer -> navigator.closeViewer()
+            else -> navigator.back()
+        }
     }
 
     /**
@@ -768,7 +780,7 @@ fun DroidMusicRoot(
                                 onClose = { controlsVisible = false },
                                 onBack = {
                                     controlsVisible = false
-                                    navigator.backToRoot()
+                                    navigator.closeViewer()
                                 },
                                 unicodeAccidentals = settings.viewer.unicodeAccidentals,
                             )
