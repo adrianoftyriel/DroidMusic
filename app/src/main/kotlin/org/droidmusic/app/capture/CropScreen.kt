@@ -19,6 +19,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
@@ -61,19 +64,26 @@ import org.droidmusic.app.ui.common.Header
  * screen opens on a rectangle just inside the frame, so a photograph the
  * arithmetic could not read is still one drag away from a straightened page
  * rather than a photograph silently kept whole.
+ *
+ * The brightness and contrast sliders are here for the same reason the corners
+ * are: what a page needs is decided by the light in the room, and this is the
+ * only screen where the page and the person who saw that room are both present.
+ * They are applied to the photograph as it is drawn, so what is on screen is
+ * what gets kept.
  */
 @Composable
 fun CropScreen(
     pending: PendingPage,
+    initialEnhancement: PageEnhancement,
     busy: Boolean,
     error: String?,
     onDismissError: () -> Unit,
-    onConfirm: (PageQuad) -> Unit,
-    onKeepWhole: () -> Unit,
+    onApply: (PageQuad?, PageEnhancement) -> Unit,
     onRetake: () -> Unit,
     onCancel: () -> Unit,
 ) {
     var quad by remember(pending.photo) { mutableStateOf(pending.quad) }
+    var enhancement by remember(pending.photo) { mutableStateOf(initialEnhancement) }
 
     BackHandler(enabled = true) { onCancel() }
 
@@ -110,8 +120,14 @@ fun CropScreen(
         CropCanvas(
             pending = pending,
             quad = quad,
+            enhancement = enhancement,
             onQuadChange = { quad = it },
             modifier = Modifier.fillMaxWidth().weight(1f),
+        )
+
+        EnhancementSliders(
+            enhancement = enhancement,
+            onChange = { enhancement = it },
         )
 
         Text(
@@ -132,10 +148,10 @@ fun CropScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Button(onClick = { onConfirm(quad) }, enabled = !busy) {
+            Button(onClick = { onApply(quad, enhancement) }, enabled = !busy) {
                 Text("Straighten page")
             }
-            OutlinedButton(onClick = onKeepWhole, enabled = !busy) {
+            OutlinedButton(onClick = { onApply(null, enhancement) }, enabled = !busy) {
                 Text("Whole photo")
             }
             TextButton(onClick = onRetake, enabled = !busy) {
@@ -161,6 +177,7 @@ fun CropScreen(
 private fun CropCanvas(
     pending: PendingPage,
     quad: PageQuad,
+    enhancement: PageEnhancement,
     onQuadChange: (PageQuad) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -189,6 +206,18 @@ private fun CropCanvas(
 
     val fit = remember(canvasSize, pending.width, pending.height, marginPx) {
         CropFit.of(canvasSize, pending.width, pending.height, marginPx)
+    }
+
+    // The same matrix the saved page is drawn through, handed to the draw call
+    // instead of to a bitmap. Nothing is re-decoded and no second copy of the
+    // photograph exists while a slider is moving - which is what makes dragging
+    // one show the answer rather than a page that catches up afterwards.
+    val filter = remember(enhancement) {
+        if (enhancement.isNeutral) {
+            null
+        } else {
+            ColorFilter.colorMatrix(ColorMatrix(enhancement.matrix()))
+        }
     }
 
     Box(
@@ -242,6 +271,7 @@ private fun CropCanvas(
                     (pending.width * fit.scale).roundToInt().coerceAtLeast(1),
                     (pending.height * fit.scale).roundToInt().coerceAtLeast(1),
                 ),
+                colorFilter = filter,
                 filterQuality = FilterQuality.Medium,
             )
 
@@ -272,6 +302,64 @@ private fun CropCanvas(
                 )
             }
         }
+    }
+}
+
+/**
+ * Brightness and contrast, and a way back to neither.
+ *
+ * Two sliders rather than one "enhance" switch, because the two failures they
+ * fix are different failures: a page shot in shade is dark, and a pencilled
+ * photocopy is flat. A single control would have to guess which one it is
+ * looking at, which is the guess this whole screen exists to stop making.
+ */
+@Composable
+private fun EnhancementSliders(
+    enhancement: PageEnhancement,
+    onChange: (PageEnhancement) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Enhance",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            // Only offered once there is something to undo, so the row does not
+            // carry a button that does nothing on the page that needs nothing.
+            if (!enhancement.isNeutral) {
+                TextButton(onClick = { onChange(PageEnhancement.NONE) }) { Text("Reset") }
+            }
+        }
+
+        EnhancementSlider(
+            label = "Brightness",
+            value = enhancement.brightness,
+            onChange = { onChange(enhancement.copy(brightness = it)) },
+        )
+        EnhancementSlider(
+            label = "Contrast",
+            value = enhancement.contrast,
+            onChange = { onChange(enhancement.copy(contrast = it)) },
+        )
+    }
+}
+
+@Composable
+private fun EnhancementSlider(label: String, value: Float, onChange: (Float) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(76.dp),
+        )
+        Slider(
+            value = value,
+            onValueChange = onChange,
+            valueRange = -1f..1f,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

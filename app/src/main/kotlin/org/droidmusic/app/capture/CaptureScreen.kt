@@ -86,11 +86,11 @@ fun CaptureScreen(
     if (pending != null) {
         CropScreen(
             pending = pending,
+            initialEnhancement = controller.enhancement,
             busy = controller.busy,
             error = controller.error,
             onDismissError = { controller.dismissError() },
-            onConfirm = { quad -> controller.applyCrop(quad) },
-            onKeepWhole = { controller.applyCrop(null) },
+            onApply = { quad, enhancement -> controller.applyCrop(quad, enhancement) },
             onRetake = {
                 controller.discardPending()
                 controller.beginCapture()?.let { camera.launch(it) }

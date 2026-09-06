@@ -528,6 +528,35 @@ The crop the player drags is in the pixels of that upright, shrunk photograph �
 the same pixels `setPolyToPoly` later reads — so a corner put on the edge of the
 page cuts on the edge of the page rather than a rounding error away from it.
 
+### Brightness and contrast belong on the same screen
+
+A photograph of paper is a photograph of a light source as much as of the ink.
+Music on a stand is lit from one side by whatever the room has, pencil
+corrections on a photocopy arrive as grey on grey, and a phone metering for a
+bright room underexposes the page in front of it. Cropping fixes none of that,
+and it is the difference between a chart that reads at arm's length in a dark
+venue and one that does not.
+
+Two sliders, not one "enhance" switch, because the two failures are different
+failures: a page shot in shade is dark, and a photocopy of a photocopy is flat.
+A single control would have to guess which one it is looking at, and guessing is
+what this screen exists to stop doing. Contrast scales about mid grey rather
+than about black — scaling about black is a brightness change wearing contrast's
+name, and it drives the paper to white long before it has done anything for the
+ink.
+
+The preview and the saved page are drawn through the same 4×5 matrix.
+`PageEnhancement` is plain Kotlin with no Android in it, so the matrix has
+tests; the crop screen hands it to `drawImage` as a colour filter, which costs
+no bitmap and no decode, so a slider under a thumb shows the answer rather than
+catching up with it; and the save hands the same matrix to the paint that draws
+the perspective transform, so the enhancement and the straightening are one
+resample rather than two.
+
+The setting carries to the next photograph of the same scan and resets when the
+scan is filed. The reason a page needed brightening is the light in the room,
+and the room does not change between page one and page two of a songbook.
+
 ### Finding the page without a vision library
 
 OpenCV would do this and is twenty times the size of the rest of the app. ML

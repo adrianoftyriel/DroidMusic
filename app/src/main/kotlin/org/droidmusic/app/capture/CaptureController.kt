@@ -36,6 +36,18 @@ class CaptureController(
     /** The photograph waiting for its crop to be confirmed, if there is one. */
     var pending by mutableStateOf<PendingPage?>(null)
         private set
+
+    /**
+     * The brightness and contrast the last page was kept at.
+     *
+     * Carried to the next photograph rather than reset, because the reason a
+     * page needed brightening is the light in the room, and the room does not
+     * change between page one and page two of the same songbook. Setting it once
+     * and having every following page arrive already right is the difference
+     * between adjusting a scan and adjusting every page of a scan.
+     */
+    var enhancement by mutableStateOf(PageEnhancement.NONE)
+        private set
     var busy by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
@@ -109,18 +121,20 @@ class CaptureController(
      * A null [quad] is the player choosing to keep the whole photograph, which
      * is the right answer for music that already fills the frame square on, and
      * for the photograph the edge finder and the player between them cannot make
-     * sense of.
+     * sense of. [enhancement] applies either way, and is remembered for the next
+     * page of the same scan.
      */
-    fun applyCrop(quad: PageQuad?) {
+    fun applyCrop(quad: PageQuad?, enhancement: PageEnhancement) {
         val waiting = pending ?: return
         if (busy) return
 
+        this.enhancement = enhancement
         scope.launch {
             busy = true
             error = null
 
             val into = File(workingDirectory, "page-${System.currentTimeMillis()}.jpg")
-            val page = PageScanner.crop(waiting.photo, quad, into)
+            val page = PageScanner.crop(waiting.photo, quad, enhancement, into)
 
             if (page == null) {
                 into.delete()
@@ -178,6 +192,7 @@ class CaptureController(
             val song = fileInLibrary(target)
             pages.forEach { it.file.delete() }
             pages = emptyList()
+            enhancement = PageEnhancement.NONE
             title = ""
             saved = song
             busy = false
@@ -231,6 +246,7 @@ class CaptureController(
     fun discardAll() {
         pages.forEach { it.file.delete() }
         pages = emptyList()
+        enhancement = PageEnhancement.NONE
         pending?.photo?.delete()
         pending = null
         pendingPhoto?.delete()

@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import java.io.File
@@ -117,16 +119,29 @@ object PageScanner {
         }
 
     /**
-     * Straightens the prepared photograph at [source] onto [quad] and writes the
-     * page to [into]. A null [quad] keeps the photograph whole.
+     * Straightens the prepared photograph at [source] onto [quad], applies
+     * [enhancement], and writes the page to [into]. A null [quad] keeps the
+     * photograph whole.
      *
      * Nothing here decides whether the crop is any good. By this point a person
-     * has looked at the photograph with the crop drawn on it and said yes, which
-     * is a better judge of where the page is than any amount of arithmetic - so
-     * a crop that arrives is applied, and the only refusal left is a transform
-     * the geometry cannot express, which comes back as the photograph whole.
+     * has looked at the photograph with the crop drawn on it and the brightness
+     * they chose applied to it, and said yes - which is a better judge of where
+     * the page is than any amount of arithmetic. So a crop that arrives is
+     * applied, and the only refusal left is a transform the geometry cannot
+     * express, which comes back as the photograph whole.
+     *
+     * The brightness and contrast ride on the same draw as the straightening
+     * rather than being a pass over the result. One draw is one resample: doing
+     * it twice would cost a second full-size bitmap on a phone that is already
+     * holding the photograph and the page at once, for a page that would look
+     * no different.
      */
-    suspend fun crop(source: File, quad: PageQuad?, into: File): ScannedPage? =
+    suspend fun crop(
+        source: File,
+        quad: PageQuad?,
+        enhancement: PageEnhancement,
+        into: File,
+    ): ScannedPage? =
         withContext(Dispatchers.IO) {
             runCatching {
                 val options = BitmapFactory.Options().apply {
@@ -135,25 +150,25 @@ object PageScanner {
                 val photo = BitmapFactory.decodeFile(source.absolutePath, options)
                     ?: return@runCatching null
 
-                val page = if (quad == null) {
-                    photo
-                } else {
-                    straighten(photo, quad.clampedTo(photo.width, photo.height))
+                // Null rather than the photograph back, so that a transform which
+                // could not be built is told apart from one that was not asked
+                // for - the page is labelled by which of those happened.
+                val straightened = quad?.let {
+                    straighten(photo, it.clampedTo(photo.width, photo.height), enhancement)
                 }
+                val page = straightened
+                    ?: if (enhancement.isNeutral) photo else enhanced(photo, enhancement)
 
                 into.parentFile?.mkdirs()
                 into.outputStream().use { out ->
                     page.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
                 }
 
-                // Compared by identity rather than by whether a quad was passed:
-                // straighten() answers a transform it cannot build by handing
-                // the photograph back, and that page was not straightened.
                 val result = ScannedPage(
                     file = into,
                     width = page.width,
                     height = page.height,
-                    straightened = page !== photo,
+                    straightened = straightened != null,
                 )
                 if (page !== photo) page.recycle()
                 photo.recycle()
@@ -270,16 +285,43 @@ object PageScanner {
     }.getOrNull()
 
     /**
-     * Maps the four corners onto a rectangle.
+     * The paint a page is drawn with, carrying the chosen brightness.
+     *
+     * Filtering and anti-aliasing on every path: a page is being resampled to a
+     * size it was not photographed at, and nearest-neighbour on staff lines is
+     * the one artefact somebody reading music at a stand will notice.
+     */
+    private fun pagePaint(enhancement: PageEnhancement): Paint =
+        Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG).apply {
+            if (!enhancement.isNeutral) {
+                colorFilter = ColorMatrixColorFilter(ColorMatrix(enhancement.matrix()))
+            }
+        }
+
+    /** The whole photograph, brightened, for a page being kept uncropped. */
+    private fun enhanced(photo: Bitmap, enhancement: PageEnhancement): Bitmap {
+        val output = runCatching {
+            Bitmap.createBitmap(photo.width, photo.height, Bitmap.Config.ARGB_8888)
+        }.getOrNull() ?: return photo
+
+        Canvas(output).drawBitmap(photo, 0f, 0f, pagePaint(enhancement))
+        return output
+    }
+
+    /**
+     * Maps the four corners onto a rectangle, or null if it cannot.
      *
      * `setPolyToPoly` with four points is a full perspective transform, which is
      * what this needs and what a rotation would not be: a page photographed from
      * slightly above is a trapezium, and de-rotating it leaves it a trapezium.
      * It can refuse - four points that are collinear or coincident have no such
-     * transform - and refusing is reported by returning the photograph untouched
-     * rather than by drawing something wrong.
+     * transform - and refusing is reported rather than drawn wrong.
      */
-    private fun straighten(photo: Bitmap, quad: PageQuad): Bitmap {
+    private fun straighten(
+        photo: Bitmap,
+        quad: PageQuad,
+        enhancement: PageEnhancement,
+    ): Bitmap? {
         val (width, height) = quad.outputSize(MAX_OUTPUT_EDGE)
 
         val source = floatArrayOf(
@@ -296,21 +338,17 @@ object PageScanner {
         )
 
         val matrix = Matrix()
-        if (!matrix.setPolyToPoly(source, 0, destination, 0, 4)) return photo
+        if (!matrix.setPolyToPoly(source, 0, destination, 0, 4)) return null
 
         val output = runCatching {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        }.getOrNull() ?: return photo
+        }.getOrNull() ?: return null
 
         Canvas(output).apply {
             // Paper, not transparency: a corner the transform does not reach
             // should read as the edge of a page rather than as a hole.
             drawColor(Color.WHITE)
-            drawBitmap(
-                photo,
-                matrix,
-                Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG),
-            )
+            drawBitmap(photo, matrix, pagePaint(enhancement))
         }
         return output
     }
