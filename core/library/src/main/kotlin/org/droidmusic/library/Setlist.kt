@@ -65,6 +65,25 @@ data class Setlist(
     fun withEntryAt(index: Int, transform: (SetlistEntry) -> SetlistEntry): Setlist =
         copy(entries = entries.mapIndexed { i, e -> if (i == index) transform(e) else e })
 
+    /**
+     * The same list with every entry for [songId] called [title].
+     *
+     * A set list carries the name a song had when it was added, because it has
+     * to say what it is on a device whose library has never seen that chart.
+     * The cost is that renaming the chart afterwards left the running order
+     * still calling it "scan-2024-11-03.pdf" - the one place the old name is
+     * read out loud between songs.
+     *
+     * Returns `this` when nothing would change, so a caller can tell a list that
+     * needs writing back from one that does not.
+     */
+    fun withSongRenamed(songId: String, title: String): Setlist {
+        if (entries.none { it.songId == songId && it.title != title }) return this
+        return copy(
+            entries = entries.map { if (it.songId == songId) it.copy(title = title) else it },
+        )
+    }
+
     fun moved(from: Int, to: Int): Setlist {
         if (from !in entries.indices || to !in entries.indices || from == to) return this
         val list = entries.toMutableList()

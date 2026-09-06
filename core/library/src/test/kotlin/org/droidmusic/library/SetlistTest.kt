@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,6 +18,61 @@ class SetlistTest {
         name = "Friday at the Anchor",
         entries = listOf(entry("a", "Wagon Wheel"), entry("b", "Folsom Prison"), entry("c", "Jolene")),
     )
+
+    /**
+     * A rename in the library has to reach the running order, which is the one
+     * place the old name gets read out between songs.
+     */
+    @Test
+    fun `renaming a song renames its entries and leaves the others alone`() {
+        val renamed = set.withSongRenamed("b", "Folsom Prison Blues")
+
+        assertEquals(
+            listOf("Wagon Wheel", "Folsom Prison Blues", "Jolene"),
+            renamed.entries.map { it.title },
+        )
+    }
+
+    @Test
+    fun `every entry for the same song is renamed, encore included`() {
+        val twice = set.copy(entries = set.entries + entry("a", "Wagon Wheel"))
+        val renamed = twice.withSongRenamed("a", "Wagon Wheel (encore)")
+
+        assertEquals(
+            listOf("Wagon Wheel (encore)", "Folsom Prison", "Jolene", "Wagon Wheel (encore)"),
+            renamed.entries.map { it.title },
+        )
+    }
+
+    /**
+     * Identity, not equality: it is what tells a caller which lists need writing
+     * back, and a rename that touched every list on the device would rewrite the
+     * file and bump the date on set lists that never held the song.
+     */
+    @Test
+    fun `a list without the song, or already holding the name, is returned unchanged`() {
+        assertSame(set, set.withSongRenamed("nothing here", "Anything"))
+        assertSame(set, set.withSongRenamed("c", "Jolene"))
+    }
+
+    @Test
+    fun `renaming keeps everything else about the entry`() {
+        val keyed = Setlist(
+            id = "s2",
+            name = "Sunday",
+            entries = listOf(
+                entry("a", "Wagon Wheel", hash = "h1")
+                    .copy(transposeSemitones = 2, capo = 3, note = "segue"),
+            ),
+        )
+        val entry = keyed.withSongRenamed("a", "Wagon Wheel (D)").entries.single()
+
+        assertEquals("Wagon Wheel (D)", entry.title)
+        assertEquals("h1", entry.contentHash)
+        assertEquals(2, entry.transposeSemitones)
+        assertEquals(3, entry.capo)
+        assertEquals("segue", entry.note)
+    }
 
     @Test
     fun `reordering moves one entry and keeps the rest`() {

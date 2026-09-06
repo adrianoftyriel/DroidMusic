@@ -1111,6 +1111,28 @@ the flag that suppresses the tap goes up when the press is recognised, not when
 the drag ends — the click can be delivered before the gesture detector hears
 that the finger has gone.
 
+### A set list stores names, so a rename has to reach it
+
+An entry carries the song's title as well as its id, and it has to: a list sent
+to a band mate has to say what it is on a phone where those ids mean nothing.
+The cost of storing the name is that it can go stale, and renaming a chart in
+the library is exactly how — the library row becomes "Wagon Wheel" and the
+running order carries on announcing `scan-2024-11-03.pdf`, which is the one
+place the name is read out loud between songs.
+
+So a rename writes through. Every list holding that song is renamed in one save
+rather than one save each, because a song can be in a dozen of them and each
+save is the whole file (section 14). Lists that do not hold it are left exactly
+as they were, `updatedAt` included — a set list sorted by when it was last
+touched should not jump to the top because a chart it does not contain was
+renamed. The rule is `Setlist.withSongRenamed` in the core, which returns the
+list unchanged by identity when there is nothing to do, and that identity is
+what tells the repository which lists need writing.
+
+What goes into the entry is the renamed chart's `bestTitle`, not the text that
+was typed. Clearing a rename is a valid thing to do, and it should put the set
+list back to the file's own title rather than to an empty row.
+
 ---
 
 ## 14. Storage

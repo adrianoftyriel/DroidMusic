@@ -123,5 +123,31 @@ class SetlistRepository(directory: File, scope: CoroutineScope) {
         current.copy(setlists = current.setlists.filterNot { it.id == id })
     }
 
+    /**
+     * Renames one song everywhere it appears in a running order.
+     *
+     * The rule itself is [Setlist.withSongRenamed], in the core, where it can be
+     * tested. Every list is rewritten in one save rather than one save each,
+     * because a song can be in a dozen of them and each save is the whole file.
+     * Lists that do not hold the song keep their [Setlist.updatedAt]: the set
+     * did not change, and bumping it would reorder a screen sorted by when
+     * somebody last touched a list.
+     */
+    suspend fun renameSong(songId: String, title: String, now: Long) {
+        val holdsIt = store.state.value.setlists.any { list ->
+            list.withSongRenamed(songId, title) !== list
+        }
+        if (!holdsIt) return
+
+        store.update { current ->
+            current.copy(
+                setlists = current.setlists.map { list ->
+                    val renamed = list.withSongRenamed(songId, title)
+                    if (renamed === list) list else renamed.copy(updatedAt = now)
+                },
+            )
+        }
+    }
+
     fun find(id: String): Setlist? = store.state.value.setlists.firstOrNull { it.id == id }
 }

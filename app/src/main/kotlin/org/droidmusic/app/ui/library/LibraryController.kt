@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.droidmusic.app.data.DocumentSources
 import org.droidmusic.app.data.LibraryRepository
+import org.droidmusic.app.data.SetlistRepository
 import org.droidmusic.app.data.SettingsRepository
 import org.droidmusic.app.data.WebChart
 import org.droidmusic.library.FileKind
@@ -35,6 +36,7 @@ class LibraryController(
     private val scope: CoroutineScope,
     private val repository: LibraryRepository,
     private val settings: SettingsRepository,
+    private val setlists: SetlistRepository,
 ) {
     val index: StateFlow<LibraryIndex> get() = repository.index
 
@@ -682,9 +684,24 @@ class LibraryController(
      *
      * What counts as a rename and what counts as clearing one is
      * [SongRef.withRename], in the core, so that the rule has a test.
+     *
+     * The new name is carried into every set list holding the song. A running
+     * order stores the name a song had when it was added - it has to, so that a
+     * list still says what it is on a device that has never seen the chart -
+     * which meant a rename stopped at the library and the set list carried on
+     * announcing the old name. The name that goes out is the renamed chart's
+     * [SongRef.bestTitle] rather than what was typed, so clearing a rename puts
+     * the set list back to the file's own title rather than to blank.
      */
     fun rename(song: SongRef, name: String) {
-        scope.launch { repository.updateSong(song.id) { it.withRename(name) } }
+        scope.launch {
+            val index = repository.updateSong(song.id) { it.withRename(name) }
+            // Straight off the songs list rather than through findById, which
+            // only looks at what is visible: a chart removed from the library is
+            // still in a set list, and is still worth renaming there.
+            val renamed = index.songs.firstOrNull { it.id == song.id } ?: return@launch
+            setlists.renameSong(song.id, renamed.bestTitle, System.currentTimeMillis())
+        }
     }
 
     /**

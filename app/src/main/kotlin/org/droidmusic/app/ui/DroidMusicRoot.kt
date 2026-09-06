@@ -91,7 +91,7 @@ fun DroidMusicRoot(
     }
 
     val libraryController = remember {
-        LibraryController(context, app.appScope, app.library, app.settings)
+        LibraryController(context, app.appScope, app.library, app.settings, app.setlists)
     }
 
     val updateController = remember { UpdateController(context, app.appScope) }
