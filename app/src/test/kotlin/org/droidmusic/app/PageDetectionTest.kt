@@ -269,4 +269,68 @@ class PageDetectionTest {
         assertEquals(120f, quad.bottomRight.x, 0.01f)
         assertEquals(240f, quad.bottomRight.y, 0.01f)
     }
+
+    /**
+     * The crop editor's own geometry.
+     *
+     * These are what stands between a dragged corner and a page cut somewhere
+     * nobody asked for: the fallback the editor opens at when nothing was
+     * found, which corner a handle actually moves, and the clamp that keeps a
+     * finger dragged off the side of the screen from asking for pixels the
+     * photograph does not have.
+     */
+    @Test
+    fun `a fallback crop sits just inside the frame, in reading order`() {
+        val quad = PageQuad.inset(width = 1000, height = 2000, fraction = 0.9f)
+
+        assertCorners(
+            quad,
+            topLeft = 50 to 100,
+            topRight = 950 to 100,
+            bottomRight = 950 to 1900,
+            bottomLeft = 50 to 1900,
+            tolerance = 0.01f,
+        )
+    }
+
+    @Test
+    fun `moving a corner moves that corner and nothing else`() {
+        val quad = PageQuad.inset(width = 100, height = 100, fraction = 1f)
+            .movingCorner(2, 60f, 70f)
+
+        assertCorners(
+            quad,
+            topLeft = 0 to 0,
+            topRight = 100 to 0,
+            bottomRight = 60 to 70,
+            bottomLeft = 0 to 100,
+            tolerance = 0.01f,
+        )
+    }
+
+    @Test
+    fun `an index outside the four corners moves nothing`() {
+        val quad = PageQuad.inset(width = 100, height = 100, fraction = 1f)
+        assertEquals(quad, quad.movingCorner(4, 10f, 10f))
+        assertEquals(quad, quad.movingCorner(-1, 10f, 10f))
+    }
+
+    @Test
+    fun `a corner dragged off the photograph is pulled back onto it`() {
+        val quad = PageQuad(
+            topLeft = QuadCorner(-40f, -10f),
+            topRight = QuadCorner(300f, 0f),
+            bottomRight = QuadCorner(120f, 400f),
+            bottomLeft = QuadCorner(0f, 100f),
+        ).clampedTo(width = 200, height = 300)
+
+        assertCorners(
+            quad,
+            topLeft = 0 to 0,
+            topRight = 200 to 0,
+            bottomRight = 120 to 300,
+            bottomLeft = 0 to 100,
+            tolerance = 0.01f,
+        )
+    }
 }

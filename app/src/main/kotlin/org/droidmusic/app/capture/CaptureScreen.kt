@@ -55,11 +55,11 @@ import org.droidmusic.library.SongRef
 /**
  * Photographing music, page by page, and filing the result.
  *
- * Every page is shown back before anything is kept. The camera is the system's,
- * so there is no live preview of the detected edges to correct against, which
- * makes seeing the finished page the only chance to notice that a corner was cut
- * off - and noticing it here costs one more photograph rather than a surprise on
- * a stand.
+ * Every photograph goes through [CropScreen] before it becomes a page, and every
+ * page is shown back before anything is kept. The camera is the system's, so
+ * there is no live preview of the detected edges to correct against; confirming
+ * the crop is where a cut-off corner gets noticed, and moving it there costs a
+ * drag rather than another photograph or a surprise on a stand.
  */
 @Composable
 fun CaptureScreen(
@@ -77,6 +77,27 @@ fun CaptureScreen(
             controller.consumeSaved()
             onOpenSaved(saved)
         }
+    }
+
+    // The crop takes the whole screen rather than sitting in a dialog over the
+    // page strip: it is one photograph being looked at closely, and the corners
+    // want every pixel of a phone held sideways over a music stand.
+    val pending = controller.pending
+    if (pending != null) {
+        CropScreen(
+            pending = pending,
+            busy = controller.busy,
+            error = controller.error,
+            onDismissError = { controller.dismissError() },
+            onConfirm = { quad -> controller.applyCrop(quad) },
+            onKeepWhole = { controller.applyCrop(null) },
+            onRetake = {
+                controller.discardPending()
+                controller.beginCapture()?.let { camera.launch(it) }
+            },
+            onCancel = { controller.discardPending() },
+        )
+        return
     }
 
     Column(
@@ -123,15 +144,16 @@ fun CaptureScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircularProgressIndicator(Modifier.width(20.dp).height(20.dp))
-                    Text("Straightening the page.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Working on the page.", style = MaterialTheme.typography.bodyMedium)
                 }
             }
 
             if (controller.pages.isEmpty()) {
                 Text(
                     "Lay the music flat, fill the frame with it, and keep the whole page in " +
-                        "shot. DroidMusic finds the edges of the page, straightens out the " +
-                        "angle you held the phone at, and saves what it finds as a PDF.",
+                        "shot. DroidMusic finds the edges of the page and shows you the crop " +
+                        "before it straightens out the angle you held the phone at. Confirmed " +
+                        "pages are saved together as a PDF.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),

@@ -57,6 +57,35 @@ data class PageQuad(
         )
 
     /**
+     * The same quad with one corner moved, for a crop being dragged by hand.
+     *
+     * [index] is a position in [corners] - 0 top left, round to 3 bottom left.
+     * The roles are only names for which handle is which; nothing here requires
+     * the top left corner to stay above the bottom one, because a player
+     * dragging a crop onto a page photographed upside down should get a quad
+     * that follows their fingers rather than one that fights them.
+     */
+    fun movingCorner(index: Int, x: Float, y: Float): PageQuad {
+        val corner = QuadCorner(x, y)
+        return when (index) {
+            0 -> copy(topLeft = corner)
+            1 -> copy(topRight = corner)
+            2 -> copy(bottomRight = corner)
+            3 -> copy(bottomLeft = corner)
+            else -> this
+        }
+    }
+
+    /** Pulls every corner back inside a frame [width] by [height]. */
+    fun clampedTo(width: Int, height: Int): PageQuad {
+        fun clamp(corner: QuadCorner) = QuadCorner(
+            corner.x.coerceIn(0f, width.toFloat()),
+            corner.y.coerceIn(0f, height.toFloat()),
+        )
+        return PageQuad(clamp(topLeft), clamp(topRight), clamp(bottomRight), clamp(bottomLeft))
+    }
+
+    /**
      * The size the straightened page should come out at.
      *
      * The longer of each pair of opposite sides wins, so nothing is squeezed:
@@ -73,6 +102,38 @@ data class PageQuad(
         val scale = if (longest > maxEdge) maxEdge / longest else 1f
         return (width * scale).toInt().coerceAtLeast(1) to
             (height * scale).toInt().coerceAtLeast(1)
+    }
+
+    companion object {
+
+        /** How much of the frame a fallback crop starts out covering. */
+        const val DEFAULT_INSET_FRACTION = 0.9f
+
+        /**
+         * A plain rectangle inside the frame, for a crop nobody has found yet.
+         *
+         * This is what the crop editor opens at when the page finder came back
+         * with nothing. It is deliberately not the whole frame: a rectangle
+         * sitting just inside the edges reads as a crop waiting to be dragged
+         * onto the page, where one flush with the edges reads as a screen that
+         * has done nothing and invites the player to press on past it.
+         */
+        fun inset(
+            width: Int,
+            height: Int,
+            fraction: Float = DEFAULT_INSET_FRACTION,
+        ): PageQuad {
+            val marginX = width * (1f - fraction) / 2f
+            val marginY = height * (1f - fraction) / 2f
+            val right = width - marginX
+            val bottom = height - marginY
+            return PageQuad(
+                topLeft = QuadCorner(marginX, marginY),
+                topRight = QuadCorner(right, marginY),
+                bottomRight = QuadCorner(right, bottom),
+                bottomLeft = QuadCorner(marginX, bottom),
+            )
+        }
     }
 }
 

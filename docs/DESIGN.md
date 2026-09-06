@@ -502,9 +502,31 @@ gets the viewfinder they already know, with their own flash, grid and focus.
 
 The alternative was CameraX and an in-app viewfinder, which buys one real thing:
 a live outline of the detected page while aiming, so a badly framed shot is
-obvious before it is taken. That is a genuine loss, and the mitigation is that
-every page is shown back for approval before anything is saved. It is the right
-trade at this size; it would not be if scanning were the app's main job.
+obvious before it is taken. That is a genuine loss, and the mitigation is the
+crop confirmation below. It is the right trade at this size; it would not be if
+scanning were the app's main job.
+
+### The crop is agreed to, never assumed
+
+A photograph does not become a page on its own. It is decoded upright, shrunk to
+the size a page is kept at, offered to the edge finder, and then shown to the
+player with the four corners drawn on it. Each corner is a handle. Nothing is
+straightened until they say so, and the alternatives sit on the same screen: keep
+the photograph whole, or retake it.
+
+This is where the missing viewfinder is paid back. Edge finding from one still is
+a guess, and the two ways a guess goes wrong need opposite answers — a crop
+slightly off the edge of the page needs nudging, a crop that found nothing needs
+drawing. Both are a drag here. The version before this one applied a confident
+detection without asking and silently kept the photograph whole when it found
+nothing, which produced the same outcome — a page neither cropped nor
+straightened — for a photograph the arithmetic could not read and for one it
+never should have been trusted on, with no way to tell them apart or to fix
+either.
+
+The crop the player drags is in the pixels of that upright, shrunk photograph —
+the same pixels `setPolyToPoly` later reads — so a corner put on the edge of the
+page cuts on the edge of the page rather than a rounding error away from it.
 
 ### Finding the page without a vision library
 
@@ -540,11 +562,15 @@ Four checks reject a detection: too small a share of the frame, too large a shar
 (which is what every degenerate case collapses to), a side too short, and a blob
 that does not fill the quad drawn round it — an L, a ring, two patches with a gap.
 
-**Every refusal keeps the photograph whole**, and the page is labelled as kept
-whole so the player knows why it looks like the picture they took. A scanner that
-crops a page through the middle of the last line is worse than one that does
-nothing, because the player only finds out at the stand, and by then the paper is
-at home.
+**A refusal is a crop nobody has found yet, not a decision.** The confirmation
+screen opens on a rectangle just inside the frame with the corners waiting to be
+dragged onto the page, and says the edges could not be found. A page kept whole
+from there is one the player chose to keep whole, and it is still labelled as such
+in the page strip so it is obvious later why it looks like the picture they took.
+A scanner that crops a page through the middle of the last line is worse than one
+that does nothing, because the player only finds out at the stand, and by then the
+paper is at home — and doing nothing is only the better failure while somebody can
+see that it happened.
 
 ### Why a PDF and where it goes
 

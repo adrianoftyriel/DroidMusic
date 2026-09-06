@@ -32,6 +32,10 @@ class CaptureController(
 ) {
     var pages by mutableStateOf<List<ScannedPage>>(emptyList())
         private set
+
+    /** The photograph waiting for its crop to be confirmed, if there is one. */
+    var pending by mutableStateOf<PendingPage?>(null)
+        private set
     var busy by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
@@ -68,6 +72,10 @@ class CaptureController(
      * A cancelled photograph is not an error and says nothing; the player
      * changed their mind, which is a normal thing to do while pointing a phone
      * at a music stand.
+     *
+     * What a successful photograph produces is a crop to look at, not a page.
+     * Nothing is added to the scan until the player has seen where the edges
+     * were found and said so.
      */
     fun onPhotoTaken(success: Boolean) {
         val photo = pendingPhoto
@@ -81,18 +89,59 @@ class CaptureController(
             busy = true
             error = null
 
-            val into = File(workingDirectory, "page-${System.currentTimeMillis()}.jpg")
-            val scanned = PageScanner.scan(context, photo, into)
+            val into = File(workingDirectory, "photo-upright-${System.currentTimeMillis()}.jpg")
+            val prepared = PageScanner.prepare(photo, into)
             photo.delete()
 
-            if (scanned == null) {
+            if (prepared == null) {
                 into.delete()
                 error = "That photo could not be read. Try taking it again."
             } else {
-                pages = pages + scanned
+                pending = prepared
             }
             busy = false
         }
+    }
+
+    /**
+     * Applies the confirmed crop and keeps the result as a page.
+     *
+     * A null [quad] is the player choosing to keep the whole photograph, which
+     * is the right answer for music that already fills the frame square on, and
+     * for the photograph the edge finder and the player between them cannot make
+     * sense of.
+     */
+    fun applyCrop(quad: PageQuad?) {
+        val waiting = pending ?: return
+        if (busy) return
+
+        scope.launch {
+            busy = true
+            error = null
+
+            val into = File(workingDirectory, "page-${System.currentTimeMillis()}.jpg")
+            val page = PageScanner.crop(waiting.photo, quad, into)
+
+            if (page == null) {
+                into.delete()
+                // The photograph is left waiting rather than thrown away: the
+                // crop can be dragged somewhere else, or kept whole, without
+                // walking back out to the camera.
+                error = "That crop could not be applied. Try moving the corners."
+            } else {
+                pages = pages + page
+                waiting.photo.delete()
+                pending = null
+            }
+            busy = false
+        }
+    }
+
+    /** Throws away the photograph waiting to be cropped. */
+    fun discardPending() {
+        pending?.photo?.delete()
+        pending = null
+        error = null
     }
 
     fun removePage(index: Int) {
@@ -110,7 +159,7 @@ class CaptureController(
      * somewhere an app should start writing to uninvited.
      */
     fun save() {
-        if (pages.isEmpty() || busy) return
+        if (pages.isEmpty() || busy || pending != null) return
         scope.launch {
             busy = true
             error = null
@@ -182,6 +231,8 @@ class CaptureController(
     fun discardAll() {
         pages.forEach { it.file.delete() }
         pages = emptyList()
+        pending?.photo?.delete()
+        pending = null
         pendingPhoto?.delete()
         pendingPhoto = null
         title = ""
